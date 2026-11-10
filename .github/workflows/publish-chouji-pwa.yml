@@ -1,0 +1,50 @@
+name: Publish Chouji PWA to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pwa-v1/**"
+      - ".github/workflows/publish-chouji-pwa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chouji-pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Assemble runtime files only
+        run: |
+          mkdir -p "$RUNNER_TEMP/chouji-site"
+          cp pwa-v1/index.html pwa-v1/manifest.webmanifest pwa-v1/sw.js "$RUNNER_TEMP/chouji-site/"
+          cp -R pwa-v1/src pwa-v1/icons "$RUNNER_TEMP/chouji-site/"
+
+      - name: Upload PWA static files
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/chouji-site
+
+      - name: Publish HTTPS site
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta name="theme-color" content="#f4f6f8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="筹记" />
+    <meta name="description" content="本机加密的资金流水与赛果记录工具" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="./src/styles.css" />
+    <title>筹记 · 本机账本</title>
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="筹记首页">
+          <span class="brand-mark" aria-hidden="true">筹</span>
+          <span><strong>筹记</strong><small>WagerMemo · 本机账本</small></span>
+        </a>
+        <button id="lock-button" class="icon-button hidden" type="button" aria-label="锁定账本" title="锁定账本">⌑</button>
+      </header>
+
+      <main>
+        <section id="vault-screen" class="vault-card" aria-labelledby="vault-title">
+          <div class="vault-symbol" aria-hidden="true">✦</div>
+          <p class="eyebrow">PRIVATE · ON THIS DEVICE</p>
+          <h1 id="vault-title">打开你的本机账本</h1>
+          <p class="vault-copy">记录加密保存在此浏览器。设置一个独立密码；忘记密码或清除网站数据后，账本无法恢复。</p>
+
+          <form id="create-vault-form" class="stack-form hidden">
+            <label for="new-password">创建账本密码</label>
+            <input id="new-password" type="password" minlength="10" autocomplete="new-password" required placeholder="至少 10 个字符" />
+            <label for="confirm-password">再次输入</label>
+            <input id="confirm-password" type="password" minlength="10" autocomplete="new-password" required placeholder="确认密码" />
+            <button class="primary-button" type="submit">创建加密账本</button>
+          </form>
+
+          <form id="unlock-form" class="stack-form hidden">
+            <label for="vault-password">账本密码</label>
+            <input id="vault-password" type="password" autocomplete="current-password" required placeholder="输入账本密码" />
+            <button class="primary-button" type="submit">解锁账本</button>
+          </form>
+          <p id="vault-error" class="inline-error" role="alert"></p>
+          <div class="security-note"><span aria-hidden="true">●</span> AES-GCM 加密 · 数据不上传 · 快照与账本同设备</div>
+        </section>
+
+        <section id="ledger-screen" class="hidden" aria-label="本机账本">
+          <section class="hero-card">
+            <div class="hero-topline">
+              <div>
+                <p class="eyebrow light">资金概览 <span id="storage-status">检查存储中…</span></p>
+            <p class="hero-caption">投注净结果</p>
+              </div>
+              <span class="currency-chip">CNY</span>
+            </div>
+            <strong id="net-total" class="hero-total">¥0.00</strong>
+            <div class="hero-stats">
+              <div><span>累计投注</span><strong id="stake-total">¥0.00</strong></div>
+              <div><span>累计返还</span><strong id="return-total">¥0.00</strong></div>
+              <div><span>记录笔数</span><strong id="entry-count">0</strong></div>
+            </div>
+          </section>
+
+          <div class="section-heading">
+            <div><p class="eyebrow">LEDGER</p><h2>最近记录</h2></div>
+            <button id="add-button" class="primary-button compact" type="button"><span aria-hidden="true">＋</span> 记一笔</button>
+          </div>
+
+          <div id="quota-warning" class="warning-banner hidden" role="status"></div>
+          <div id="empty-state" class="empty-state hidden">
+            <span class="empty-icon" aria-hidden="true">↗</span>
+            <h3>从第一笔开始</h3>
+            <p>记录投入和回收，筹记会在本机汇总净变化。</p>
+            <button class="text-button" type="button" data-open-form>新增记录</button>
+          </div>
+          <ul id="entry-list" class="entry-list" aria-live="polite"></ul>
+
+          <section class="privacy-card">
+            <div class="privacy-icon" aria-hidden="true">⌂</div>
+            <div><strong>仅保存在这台设备</strong><p>主账本和加密快照都在当前浏览器。清除网站数据、浏览器卸载或设备丢失可能让数据永久消失。</p></div>
+          </section>
+
+          <section class="footer-actions">
+            <button id="restore-button" class="secondary-button" type="button">从上一份快照恢复</button>
+            <button id="install-button" class="secondary-button hidden" type="button">安装到主屏幕</button>
+            <span id="storage-meter" class="storage-meter"></span>
+          </section>
+        </section>
+      </main>
+
+      <footer class="app-footer">筹记不提供投注服务或建议，只记录你手动输入的数据。</footer>
+    </div>
+
+    <dialog id="entry-dialog" class="sheet-dialog">
+      <form id="entry-form" method="dialog" class="sheet-content">
+        <div class="dialog-grabber" aria-hidden="true"></div>
+        <div class="dialog-heading"><div><p class="eyebrow">LEDGER ENTRY</p><h2 id="entry-title">新增记录</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="关闭">×</button></div>
+        <label class="field-label" for="entry-kind">类型</label>
+        <select id="entry-kind" required>
+          <option value="stake">投注支出</option>
+          <option value="payout">派彩返还</option>
+          <option value="deposit">账户存入</option>
+          <option value="withdrawal">账户取出</option>
+          <option value="refund">退款 / 退回</option>
+        </select>
+        <label class="field-label" for="entry-amount">金额（CNY）</label>
+        <div class="amount-input"><span>¥</span><input id="entry-amount" type="number" inputmode="decimal" min="0.01" max="999999999.99" step="0.01" placeholder="0.00" required /></div>
+        <label class="field-label" for="entry-date">日期</label>
+        <input id="entry-date" type="date" required />
+        <label class="field-label" for="entry-note">备注 <span class="muted">选填</span></label>
+        <input id="entry-note" type="text" maxlength="120" placeholder="例如：赛事或平台" />
+        <p id="entry-error" class="inline-error" role="alert"></p>
+        <button id="entry-save-button" class="primary-button save-button" type="submit">加密保存</button>
+      </form>
+    </dialog>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
