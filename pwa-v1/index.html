@@ -45,51 +45,121 @@
             <input id="vault-password" type="password" autocomplete="current-password" required placeholder="输入账本密码" />
             <button class="primary-button" type="submit">解锁账本</button>
           </form>
+          <div class="backup-entry-point">
+            <input id="backup-file-input" class="hidden" type="file" accept="application/json,.json" />
+            <button id="backup-import-button" class="text-button hidden" type="button">从加密备份导入</button>
+          </div>
           <p id="vault-error" class="inline-error" role="alert"></p>
           <div class="security-note"><span aria-hidden="true">●</span> AES-GCM 加密 · 数据不上传 · 快照与账本同设备</div>
         </section>
 
         <section id="ledger-screen" class="hidden" aria-label="本机账本">
-          <section class="hero-card">
-            <div class="hero-topline">
-              <div>
-                <p class="eyebrow light">资金概览 <span id="storage-status">检查存储中…</span></p>
-            <p class="hero-caption">投注净结果</p>
+          <div id="page-overview" class="app-page">
+            <section class="hero-card">
+              <div class="hero-topline">
+                <div>
+                  <p class="eyebrow light">本机账本 <span id="storage-status">检查存储中…</span></p>
+                  <p class="hero-caption">投注净结果</p>
+                </div>
+                <span class="currency-chip">CNY</span>
               </div>
-              <span class="currency-chip">CNY</span>
-            </div>
-            <strong id="net-total" class="hero-total">¥0.00</strong>
-            <div class="hero-stats">
-              <div><span>累计投注</span><strong id="stake-total">¥0.00</strong></div>
-              <div><span>累计返还</span><strong id="return-total">¥0.00</strong></div>
-              <div><span>记录笔数</span><strong id="entry-count">0</strong></div>
-            </div>
-          </section>
+              <strong id="net-total" class="hero-total">¥0.00</strong>
+              <div class="hero-stats">
+                <div><span>累计投注</span><strong id="stake-total">¥0.00</strong></div>
+                <div><span>累计返还</span><strong id="return-total">¥0.00</strong></div>
+                <div><span>记录笔数</span><strong id="entry-count">0</strong></div>
+              </div>
+            </section>
 
-          <div class="section-heading">
-            <div><p class="eyebrow">LEDGER</p><h2>最近记录</h2></div>
-            <button id="add-button" class="primary-button compact" type="button"><span aria-hidden="true">＋</span> 记一笔</button>
+            <section class="content-card overview-period">
+              <div class="card-heading"><div><p class="eyebrow">LAST 7 DAYS</p><h2>近一周表现</h2></div><strong id="week-net" class="mini-total">¥0.00</strong></div>
+              <div class="mini-metrics"><span>投注 <strong id="week-stake">¥0.00</strong></span><span>返还 <strong id="week-return">¥0.00</strong></span></div>
+              <div id="week-chart" class="trend-list compact-trend" aria-label="近七日每日投注净结果"></div>
+            </section>
+
+            <div class="section-heading">
+              <div><p class="eyebrow">RECENT</p><h2>最近记录</h2></div>
+              <button class="primary-button compact" type="button" data-open-form><span aria-hidden="true">＋</span> 记一笔</button>
+            </div>
+            <div id="overview-empty-state" class="empty-state hidden">
+              <span class="empty-icon" aria-hidden="true">↗</span>
+              <h3>从第一笔开始</h3>
+              <p>录入流水后，这里会显示净结果、近一周表现和最近记录。</p>
+              <button class="text-button" type="button" data-open-form>新增记录</button>
+            </div>
+            <ul id="overview-recent-list" class="entry-list" aria-live="polite"></ul>
+
+            <section class="privacy-card">
+              <div class="privacy-icon" aria-hidden="true">⌂</div>
+              <div><strong>数据只保存在此设备</strong><p>主账本和加密快照位于当前浏览器。清除网站数据、浏览器卸载或设备丢失可能导致账本永久消失。</p></div>
+            </section>
           </div>
 
-          <div id="quota-warning" class="warning-banner hidden" role="status"></div>
-          <div id="empty-state" class="empty-state hidden">
-            <span class="empty-icon" aria-hidden="true">↗</span>
-            <h3>从第一笔开始</h3>
-            <p>记录投入和回收，筹记会在本机汇总净变化。</p>
-            <button class="text-button" type="button" data-open-form>新增记录</button>
+          <div id="page-records" class="app-page hidden">
+            <div class="section-heading page-heading">
+              <div><p class="eyebrow">LEDGER</p><h2>流水明细</h2></div>
+              <button class="primary-button compact" type="button" data-open-form><span aria-hidden="true">＋</span> 记一笔</button>
+            </div>
+            <div class="filter-row" role="group" aria-label="按流水类型筛选">
+              <button class="filter-chip selected" type="button" data-filter="all" aria-pressed="true">全部</button>
+              <button class="filter-chip" type="button" data-filter="stake" aria-pressed="false">投注</button>
+              <button class="filter-chip" type="button" data-filter="payout" aria-pressed="false">派彩</button>
+              <button class="filter-chip" type="button" data-filter="refund" aria-pressed="false">退款</button>
+              <button class="filter-chip" type="button" data-filter="movement" aria-pressed="false">账户存取</button>
+            </div>
+            <p id="records-count" class="results-caption">共 0 笔记录</p>
+            <div id="records-empty-state" class="empty-state hidden">
+              <span class="empty-icon" aria-hidden="true">☷</span>
+              <h3 id="records-empty-title">还没有流水</h3>
+              <p id="records-empty-copy">记录投注、派彩或账户资金移动后会显示在这里。</p>
+              <button class="text-button" type="button" data-open-form>新增记录</button>
+            </div>
+            <ul id="entry-list" class="entry-list" aria-live="polite"></ul>
+            <div id="quota-warning" class="warning-banner hidden" role="status"></div>
+            <section class="footer-actions">
+              <button id="restore-button" class="secondary-button" type="button">从上一份快照恢复</button>
+              <button id="backup-export-button" class="secondary-button" type="button">导出加密备份</button>
+              <button id="install-button" class="secondary-button hidden" type="button">安装到主屏幕</button>
+              <span id="storage-meter" class="storage-meter"></span>
+            </section>
+            <p id="backup-status" class="backup-status" role="status"></p>
           </div>
-          <ul id="entry-list" class="entry-list" aria-live="polite"></ul>
 
-          <section class="privacy-card">
-            <div class="privacy-icon" aria-hidden="true">⌂</div>
-            <div><strong>仅保存在这台设备</strong><p>主账本和加密快照都在当前浏览器。清除网站数据、浏览器卸载或设备丢失可能让数据永久消失。</p></div>
-          </section>
+          <div id="page-analysis" class="app-page hidden">
+            <div class="section-heading page-heading">
+              <div><p class="eyebrow">ANALYSIS</p><h2>统计分析</h2></div>
+              <span class="currency-chip dark-chip">CNY</span>
+            </div>
+            <div class="period-switch" role="group" aria-label="分析周期">
+              <button class="period-chip selected" type="button" data-period="7" aria-pressed="true">近 7 天</button>
+              <button class="period-chip" type="button" data-period="30" aria-pressed="false">近 30 天</button>
+              <button class="period-chip" type="button" data-period="all" aria-pressed="false">全部</button>
+            </div>
+            <p id="analysis-period-label" class="results-caption"></p>
+            <section class="analysis-grid">
+              <article class="metric-card"><span>投注净结果</span><strong id="analysis-net">¥0.00</strong></article>
+              <article class="metric-card"><span>投注金额</span><strong id="analysis-stake">¥0.00</strong></article>
+              <article class="metric-card"><span>派彩与退款</span><strong id="analysis-return">¥0.00</strong></article>
+              <article class="metric-card"><span>净结果 / 投注</span><strong id="analysis-rate">—</strong></article>
+            </section>
+            <section class="content-card analysis-card">
+              <div class="card-heading"><div><p class="eyebrow">DAILY RESULT</p><h2 id="trend-title">每日净结果</h2></div></div>
+              <div id="analysis-trend" class="trend-list" aria-label="每日投注净结果"></div>
+              <p id="analysis-no-trend" class="empty-hint hidden">这个周期暂无投注、派彩或退款记录。</p>
+            </section>
+            <section class="content-card analysis-card">
+              <div class="card-heading"><div><p class="eyebrow">ACTIVITY MIX</p><h2>流水构成</h2></div></div>
+              <div id="type-breakdown" class="breakdown-list"></div>
+              <p id="breakdown-empty" class="empty-hint hidden">添加流水后可查看投注、派彩、退款和账户存取构成。</p>
+            </section>
+            <p class="analysis-note">净结果按“派彩 + 退款 − 投注”计算；账户存入和取出不计入投注净结果。</p>
+          </div>
 
-          <section class="footer-actions">
-            <button id="restore-button" class="secondary-button" type="button">从上一份快照恢复</button>
-            <button id="install-button" class="secondary-button hidden" type="button">安装到主屏幕</button>
-            <span id="storage-meter" class="storage-meter"></span>
-          </section>
+          <nav id="tab-bar" class="tab-bar" aria-label="主导航">
+            <button class="tab-button selected" type="button" data-page="overview" aria-current="page"><span aria-hidden="true">⌂</span><small>概览</small></button>
+            <button class="tab-button" type="button" data-page="records" aria-current="false"><span aria-hidden="true">☷</span><small>明细</small></button>
+            <button class="tab-button" type="button" data-page="analysis" aria-current="false"><span aria-hidden="true">◔</span><small>分析</small></button>
+          </nav>
         </section>
       </main>
 
@@ -119,6 +189,19 @@
       </form>
     </dialog>
 
+    <dialog id="backup-import-dialog" class="sheet-dialog backup-dialog">
+      <form id="backup-import-form" class="sheet-content">
+        <div class="dialog-grabber" aria-hidden="true"></div>
+        <div class="dialog-heading"><div><p class="eyebrow">ENCRYPTED RESTORE</p><h2>导入加密备份</h2></div><button id="close-backup-dialog" class="icon-button" type="button" aria-label="关闭">×</button></div>
+        <p class="vault-copy backup-copy">备份仅在此设备建立本机账本。输入创建备份时使用的账本密码；密码不匹配时不会写入。</p>
+        <label class="field-label" for="backup-password">账本密码</label>
+        <input id="backup-password" type="password" autocomplete="current-password" required />
+        <p id="backup-import-error" class="inline-error" role="alert"></p>
+        <button id="backup-import-submit" class="primary-button save-button" type="submit">验证并导入</button>
+      </form>
+    </dialog>
+
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>
+

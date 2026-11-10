@@ -78,11 +78,11 @@ function base64ToBytes(value) {
   return bytes;
 }
 
-async function deriveKey(password, salt) {
+async function deriveKey(password, salt, iterations = PBKDF2_ITERATIONS) {
   const webCrypto = globalThis.crypto;
   const material = await webCrypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
   return webCrypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
     material,
     { name: "AES-GCM", length: 256 },
     false,
@@ -200,3 +200,131 @@ export async function requestPersistentStorage() {
   }
   return false;
 }
+
+export async function exportEncryptedBackup() {
+  const db = await openDatabase();
+  const tx = createTransaction(db, ["meta", "state", "snapshots"], "readonly");
+  const [meta, savedState, snapshots] = await Promise.all([
+    requestResult(tx.objectStore("meta").get(VAULT_KEY)),
+    requestResult(tx.objectStore("state").get(STATE_KEY)),
+    requestResult(tx.objectStore("snapshots").getAll()),
+  ]);
+  if (!meta || !savedState?.envelope) throw new Error("本机账本不完整，无法生成备份。");
+  return {
+    format: "chouji-encrypted-backup",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    meta,
+    state: savedState.envelope,
+    snapshots: snapshots.sort((a, b) => b.sequence - a.sequence).map(({ sequence, createdAt, envelope }) => ({ sequence, createdAt, envelope })),
+  };
+}
+
+function isValidDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function validateState(state, expectedSequence) {
+  if (!state || !Number.isSafeInteger(state.sequence) || state.sequence < 1 || state.sequence !== expectedSequence || !Array.isArray(state.records) || state.records.length > 100_000) {
+    throw new Error("备份账本结构无效。");
+  }
+  const ids = new Set();
+  for (const record of state.records) {
+    const sign = { stake: -1, payout: 1, deposit: 1, withdrawal: -1, refund: 1 }[record?.kind];
+    if (!record || typeof record.id !== "string" || !record.id || record.id.length > 128 || ids.has(record.id)
+      || !sign || !Number.isSafeInteger(record.amountMinor) || record.amountMinor <= 0
+      || record.deltaMinor !== record.amountMinor * sign || !isValidDate(record.date)
+      || typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt))
+      || typeof record.note !== "string" || record.note.length > 120) {
+      throw new Error("备份中存在无效流水，导入已取消。");
+    }
+    ids.add(record.id);
+  }
+}
+
+function validateEnvelope(envelope) {
+  if (!envelope || envelope.v !== 1 || !Number.isSafeInteger(envelope.sequence) || envelope.sequence < 1
+    || typeof envelope.iv !== "string" || typeof envelope.ciphertext !== "string") {
+    throw new Error("加密备份格式无效。");
+  }
+}
+
+export async function importEncryptedBackup(bundle, password) {
+  if (!bundle || bundle.format !== "chouji-encrypted-backup" || bundle.version !== 1) {
+    throw new Error("这不是受支持的筹记加密备份文件。");
+  }
+  const meta = bundle.meta;
+  if (!meta || meta.id !== VAULT_KEY || meta.version !== 1 || meta.kdf !== "PBKDF2-SHA256"
+    || !Number.isSafeInteger(meta.iterations) || meta.iterations < 100_000 || meta.iterations > 2_000_000) {
+    throw new Error("备份的加密参数无效或版本不受支持。");
+  }
+  let salt;
+  try { salt = base64ToBytes(meta.salt); } catch { throw new Error("备份的密钥盐值无效。"); }
+  if (salt.length < 16 || salt.length > 64) throw new Error("备份的密钥盐值无效。");
+  validateEnvelope(bundle.state);
+  const snapshots = Array.isArray(bundle.snapshots) ? bundle.snapshots : [];
+  if (snapshots.length > SNAPSHOT_LIMIT) throw new Error("备份快照数量超出支持范围。");
+
+  const key = await deriveKey(password, salt, meta.iterations);
+  let state;
+  try {
+    state = await decryptState(bundle.state, key);
+    validateState(state, bundle.state.sequence);
+  } catch (error) {
+    if (error.message === "备份账本结构无效。" || error.message === "备份中存在无效流水，导入已取消。") throw error;
+    throw new Error("密码不正确，或备份主账本已损坏。没有写入数据。");
+  }
+
+  const snapshotRows = [];
+  for (const snapshot of snapshots) {
+    validateEnvelope(snapshot.envelope);
+    if (snapshot.sequence !== snapshot.envelope.sequence || snapshot.sequence > state.sequence) throw new Error("备份快照序号不匹配。");
+    let snapshotState;
+    try {
+      snapshotState = await decryptState(snapshot.envelope, key);
+      validateState(snapshotState, snapshot.envelope.sequence);
+    } catch {
+      throw new Error("备份中有快照无法验证，导入已取消。");
+    }
+    snapshotRows.push({ id: `snapshot-${snapshot.sequence}`, sequence: snapshot.sequence, createdAt: snapshot.createdAt, envelope: snapshot.envelope });
+  }
+  if (!snapshotRows.some((row) => row.sequence === state.sequence)) {
+    snapshotRows.push({ id: `snapshot-${state.sequence}`, sequence: state.sequence, createdAt: bundle.state.updatedAt, envelope: bundle.state });
+  }
+  snapshotRows.sort((a, b) => b.sequence - a.sequence);
+  snapshotRows.splice(SNAPSHOT_LIMIT);
+
+  const db = await openDatabase();
+  const tx = createTransaction(db, ["meta", "state", "snapshots"], "readwrite");
+  const metaStore = tx.objectStore("meta");
+  const checks = [metaStore.get(VAULT_KEY), tx.objectStore("state").get(STATE_KEY), tx.objectStore("snapshots").getAll()];
+  let existingVault = false;
+  let checksPending = checks.length;
+  const checkExisting = (request, occupied) => {
+    request.onsuccess = () => {
+      existingVault ||= occupied(request.result);
+      checksPending -= 1;
+      if (checksPending > 0) return;
+      if (existingVault) {
+        tx.abort();
+        return;
+      }
+      metaStore.put(meta);
+      tx.objectStore("state").put({ id: STATE_KEY, envelope: bundle.state });
+      const store = tx.objectStore("snapshots");
+      for (const row of snapshotRows) store.put(row);
+    };
+  };
+  checkExisting(checks[0], Boolean);
+  checkExisting(checks[1], Boolean);
+  checkExisting(checks[2], (rows) => rows.length > 0);
+  await transactionDone(tx).catch((error) => {
+    if (existingVault) throw new Error("本机已经存在账本，导入已取消；现有账本没有被修改。");
+    throw error;
+  });
+  return { key, state };
+}
+
