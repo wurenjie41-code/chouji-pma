@@ -42,6 +42,7 @@ GitHub Pages 是公开静态托管。公开的是程序和图标，不是存放�
 
 - `DATA_MODEL.md`：IndexedDB、加密 envelope、资金流水与备份格式
 - `IMPLEMENTATION_PLAN.md`：已完成项、发布与设备检查计划
+- `RISK_MANAGEMENT_ROADMAP.md`：从当前流水版迁移到个人投注记录与风险保护的分阶段方案
 - `index.html`：页面与安装元数据
 - `src/app.js`：页面渲染、分析与交互
 - `src/storage.js`：IndexedDB、WebCrypto、快照、加密备份
