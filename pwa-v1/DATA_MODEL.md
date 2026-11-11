@@ -84,11 +84,11 @@ V1 为单账本、单币种 CNY；所有金额用整数分保存，不以浮点�
 | `tags`, `note`, `beforeState`, `source` | 标签、备注、下注前状态、来源；当前来源为 `manual` |
 | `id`, `createdAt`, `updatedAt` | UUID 与创建/修改时间 |
 
-`wagerResult = actualReturnMinor - stakeMinor - feeMinor`。ROI 只计入已结算且非作废投注：`ROI = 已结算投注净结果 ÷ 已结算投注额`。作废注不计入 ROI 分子或分母，但实际返还仍计入资金变化。未结算投注不计返还或净结果，未结算本金独立展示为资金敞口。每注返还不再另建 payout 流水。
+`wagerResult = actualReturnMinor - stakeMinor - feeMinor`。ROI 只计入已结算且非作废投注：`ROI = 已结算投注净结果 ÷ 已结算投注额`。作废注不计入 ROI 分子或分母，但实际返还仍计入资金变化。未结算投注不计返还或净结果，概览敞口统计所有尚未结算本金，不限于当前预算周期。每注返还不再另建 payout 流水。
 
 ### 风险设置 `riskSettings`
 
-包含 `period`（monthly/weekly）、`budgetMinor`、`lossLimitMinor`、`maxStakeMinor`、可选 `allowedStart`/`allowedEnd`、`cooloffUntil` 和 `stoppedPeriodKey`。金额上限默认为空，由用户设置；本周期已有投注后不允许提高/取消金额上限或放宽时段。预算按投注日期累计本金，赢款不返还额度。亏损风险占用把当期已结算净亏损与未结算本金合并用于拦截，文案明确未结算本金不是已发生亏损。硬限制仅作用于应用内新增投注。
+包含 `period`（monthly/weekly）、`budgetMinor`、`lossLimitMinor`、`maxStakeMinor`、可选 `allowedStart`/`allowedEnd`、`cooloffUntil` 和 `stoppedPeriodKey`。金额上限默认为空，由用户设置；本周期已有投注后不允许提高/取消金额上限或放宽时段。预算按投注日期累计本金，赢款不返还额度。风险占用 = 本周期按结算日期汇总的逐注净亏损（下限为 0） + 旧版未关联记录的当期净亏损估算（下限为 0） + 全部未结算本金。硬限制会拦截新增投注，并阻止编辑提高已超限的单笔金额、周期预算占用或风险敞口；允许不增加风险的纠错。资金变化按发生日归档：本金按投注日期，实际返还与手续费按结算日期。
 
 ### 审计历史与备份
 
