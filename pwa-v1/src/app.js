@@ -189,7 +189,7 @@ function auditFields(entity, value) {
     ["feeMinor", "手续费", formatMoney(value.feeMinor ?? 0)], ["settledAt", "结算时间", dateTime(value.settledAt)],
     ["result", "赛果", value.result || "未填写"], ["tags", "标签", (Array.isArray(value.tags) ? value.tags : []).join("、") || "无"],
     ["beforeState", "下注前状态", value.beforeState || "未填写"], ["note", "备注", value.note || "无"],
-    ["source", "录入来源", value.source === "image" ? "图片识别" : "手工录入"], ["placedAt", "投注时间", dateTime(value.placedAt)],
+    ["source", "录入来源", value.source === "image" ? "图片对照" : "手工录入"], ["placedAt", "投注时间", dateTime(value.placedAt)],
   ].map(([key, label, text]) => ({ key, label, text, raw: value[key] ?? null }));
   if (entity === "record") return [
     ["kind", "流水类型", TYPE[value.kind]?.label ?? value.kind], ["amountMinor", "金额", formatMoney(value.amountMinor)],
@@ -297,7 +297,7 @@ function createWagerRow(wager, withActions = true) {
   details.className = "entry-details";
   const title = document.createElement("strong");
   title.textContent = wager.event;
-  const meta = [wager.sport, wager.league, wager.market, wager.platform, wager.combo === "parlay" ? "串关" : "单关", WAGER_STATUS[wager.status], wager.source === "image" ? "图片识别" : "手工录入", wager.result].filter(Boolean).join(" · ");
+  const meta = [wager.sport, wager.league, wager.market, wager.platform, wager.combo === "parlay" ? "串关" : "单关", WAGER_STATUS[wager.status], wager.source === "image" ? "图片对照" : "手工录入", wager.result].filter(Boolean).join(" · ");
   const subtitle = document.createElement("span");
   subtitle.textContent = `${formatDate(localDateFromTimestamp(wager.placedAt), true)} · ${meta}`;
   const detail = document.createElement("span");
@@ -1513,7 +1513,7 @@ function exportCsv() {
       oddsCsv(wager.oddsMilli), minorCsv(wager.stakeMinor), wager.combo === "parlay" ? "串关" : "单关", WAGER_STATUS[wager.status] ?? wager.status,
       wager.status === "open" ? "" : minorCsv(wager.actualReturnMinor), wager.status === "open" ? "" : minorCsv(wagerResult(wager)),
       wager.status === "open" ? "" : minorCsv(wager.feeMinor), wager.result, (wager.tags ?? []).join("; "), wager.beforeState,
-      minorCsv(cashChange), wager.note, wager.source === "image" ? "图片识别" : "手工录入",
+      minorCsv(cashChange), wager.note, wager.source === "image" ? "图片对照" : "手工录入",
     ]);
   }
   for (const record of session.state.records) {
