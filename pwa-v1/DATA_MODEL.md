@@ -81,10 +81,12 @@ V1 为单账本、单币种 CNY；所有金额用整数分保存，不以浮点�
 | `oddsMilli` | 十进制赔率乘 1000 后的整数，未填为 `null` |
 | `stakeMinor`, `actualReturnMinor`, `feeMinor` | CNY 整数分；未结算时返还为空、手续费为 0 |
 | `combo`, `status`, `result` | 单关/串关；open、won、lost、void、cashout；赛果文字 |
-| `tags`, `note`, `beforeState`, `source` | 标签、备注、下注前状态、来源；当前来源为 `manual` |
+| `tags`, `note`, `beforeState`, `source` | 标签、备注、下注前状态、来源；`manual` 表示手工录入，`image` 表示曾用本机临时图片对照；图片像素不进入账本 |
 | `id`, `createdAt`, `updatedAt` | UUID 与创建/修改时间 |
 
 `wagerResult = actualReturnMinor - stakeMinor - feeMinor`。ROI 只计入已结算且非作废投注：`ROI = 已结算投注净结果 ÷ 已结算投注额`。作废注不计入 ROI 分子或分母，但实际返还仍计入资金变化。未结算投注不计返还或净结果，概览敞口统计所有尚未结算本金，不限于当前预算周期。每注返还不再另建 payout 流水。
+
+图片对照只使用浏览器临时对象 URL 预览，单张限制 10 MB；对象 URL 在移除图片、关闭录入表单或保存后撤销。原图不会进入加密状态、审计历史、备份或 CSV。此功能是手工对照入口，不提供 OCR。
 
 ### 风险设置 `riskSettings`
 
@@ -93,3 +95,4 @@ V1 为单账本、单币种 CNY；所有金额用整数分保存，不以浮点�
 ### 审计历史与备份
 
 投注、流水和风险设置修改都会进入加密 payload 的 `auditLog[]`，保存时间、实体 ID、操作及前后值，最多保留 500 条。密文备份格式仍为版本 1；导入时解密后补齐旧字段并校验金额、状态、字段类型及快照。备份导入只写入空账本。浏览器内快照可能随本机网站数据一起丢失，需另行导出密文文件。
+
