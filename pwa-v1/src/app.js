@@ -34,6 +34,9 @@ let activeWagerFilter = "all";
 let analysisDateBasis = "placed";
 let activeAnalysisPeriod = "month";
 let activeWagerDrilldown = null;
+let wagerPreviewUrl = null;
+let wagerEntrySource = "manual";
+let wagerOriginalSource = "manual";
 
 function formatMoney(minor) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(minor / 100);
@@ -974,6 +977,46 @@ function localDateTimeInput(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function updateWagerImageNote() {
+  const note = $("#wager-image-note");
+  if (wagerPreviewUrl) {
+    note.textContent = "图片只在本机临时预览；请手工核对金额、赔率、玩法和结果。保存记录或关闭窗口后，图片会从预览中移除。";
+  } else if (editingWagerId && wagerOriginalSource === "image") {
+    note.textContent = "这条记录标记为图片对照来源；原图片未保存。如需重新对照，可选择图片临时预览。";
+  } else {
+    note.textContent = "图片只在本机临时预览，不会上传或写入账本。当前版本不自动识别文字，请对照图片手工核对录入。";
+  }
+}
+
+function clearWagerImagePreview(restoreOriginalSource = true) {
+  if (wagerPreviewUrl) URL.revokeObjectURL(wagerPreviewUrl);
+  wagerPreviewUrl = null;
+  $("#wager-image-preview").removeAttribute("src");
+  $("#wager-image-preview-wrap").classList.add("hidden");
+  $("#wager-image-input").value = "";
+  wagerEntrySource = restoreOriginalSource ? wagerOriginalSource : "manual";
+  updateWagerImageNote();
+}
+
+function selectWagerImage(file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    setError("#wager-error", "请选择图片文件。");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    setError("#wager-error", "图片超过 10 MB。请先在本机缩小图片后再选择；文件不会上传。");
+    return;
+  }
+  clearWagerImagePreview(false);
+  wagerPreviewUrl = URL.createObjectURL(file);
+  wagerEntrySource = "image";
+  $("#wager-image-preview").src = wagerPreviewUrl;
+  $("#wager-image-preview-wrap").classList.remove("hidden");
+  setError("#wager-error");
+  updateWagerImageNote();
+}
+
 function wagerBlockReasons(candidate, current) {
   const settings = session.state.riskSettings;
   const reasons = [];
@@ -1054,7 +1097,7 @@ async function saveWager(event) {
     tags,
     note: $("#wager-note").value.trim(),
     beforeState: $("#wager-state").value.trim(),
-    source: "manual",
+    source: wagerEntrySource,
     createdAt: current?.createdAt ?? new Date().toISOString(),
     ...(current ? { updatedAt: new Date().toISOString() } : {}),
   };
@@ -1097,6 +1140,8 @@ function syncSettlementFields() {
 
 function openNewWager() {
   editingWagerId = null;
+  wagerOriginalSource = "manual";
+  clearWagerImagePreview(false);
   $("#wager-form").reset();
   $("#wager-title").textContent = "记录投注";
   $("#wager-save-button").textContent = "加密保存投注";
@@ -1113,6 +1158,9 @@ function openEditWager(id) {
   const wager = session.state.wagers.find((item) => item.id === id);
   if (!wager) return;
   editingWagerId = wager.id;
+  wagerOriginalSource = wager.source === "image" ? "image" : "manual";
+  clearWagerImagePreview(false);
+  wagerEntrySource = wagerOriginalSource;
   $("#wager-title").textContent = wager.status === "open" ? "投注记录 / 结算" : "编辑已记录投注";
   $("#wager-save-button").textContent = "加密保存更改";
   $("#wager-event").value = wager.event;
@@ -1562,9 +1610,17 @@ $$(`[data-wager-filter]`).forEach((button) => button.addEventListener("click", (
 }));
 $("#wager-status").addEventListener("change", syncSettlementFields);
 $("#wager-form").addEventListener("submit", saveWager);
+$("#wager-image-input").addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  selectWagerImage(file);
+});
+$("#remove-wager-image").addEventListener("click", () => clearWagerImagePreview(true));
 $("#close-wager-dialog").addEventListener("click", () => wagerDialog.close());
 wagerDialog.addEventListener("close", () => {
   editingWagerId = null;
+  wagerOriginalSource = "manual";
+  clearWagerImagePreview(false);
   $("#wager-form").reset();
   setError("#wager-error");
 });
@@ -1719,3 +1775,4 @@ if (location.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(locat
 }
 
 refreshVaultState();
+
