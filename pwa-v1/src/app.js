@@ -170,7 +170,11 @@ function describeAuditValue(entity, value) {
 
 function auditFields(entity, value) {
   if (!value) return [];
-  const dateTime = (raw) => raw ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(raw)) : "未填写";
+  const dateTime = (raw) => {
+    if (!raw) return "未填写";
+    const date = new Date(raw);
+    return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date) : "时间无效";
+  };
   const timeLimit = (raw) => raw || "未限制";
   if (entity === "wager") return [
     ["event", "比赛 / 事件", value.event], ["sport", "运动 / 类别", value.sport || "未填写"], ["league", "联赛", value.league || "未填写"],
@@ -180,7 +184,7 @@ function auditFields(entity, value) {
     ["status", "结算状态", WAGER_STATUS[value.status] ?? value.status],
     ["actualReturnMinor", "实际返还", value.actualReturnMinor == null ? "未结算" : formatMoney(value.actualReturnMinor)],
     ["feeMinor", "手续费", formatMoney(value.feeMinor ?? 0)], ["settledAt", "结算时间", dateTime(value.settledAt)],
-    ["result", "赛果", value.result || "未填写"], ["tags", "标签", (value.tags ?? []).join("、") || "无"],
+    ["result", "赛果", value.result || "未填写"], ["tags", "标签", (Array.isArray(value.tags) ? value.tags : []).join("、") || "无"],
     ["beforeState", "下注前状态", value.beforeState || "未填写"], ["note", "备注", value.note || "无"],
     ["source", "录入来源", value.source === "image" ? "图片识别" : "手工录入"], ["placedAt", "投注时间", dateTime(value.placedAt)],
   ].map(([key, label, text]) => ({ key, label, text, raw: value[key] ?? null }));
@@ -931,21 +935,28 @@ function renderRisk() {
     summary.className = "audit-summary";
     summary.textContent = `${at} · ${action}${entity}：${before}${entry.before && entry.after ? ` → ${after}` : entry.after ? `：${after}` : ""}`;
     item.append(summary);
-    const changes = auditChanges(entry);
-    if (changes.length) {
-      const details = document.createElement("details");
-      details.className = "audit-details";
-      const heading = document.createElement("summary");
-      heading.textContent = `查看 ${changes.length} 项字段明细`;
-      const list = document.createElement("ul");
-      for (const change of changes) {
+    const details = document.createElement("details");
+    details.className = "audit-details";
+    const heading = document.createElement("summary");
+    heading.textContent = "查看字段明细";
+    const list = document.createElement("ul");
+    let rendered = false;
+    details.addEventListener("toggle", () => {
+      if (!details.open || rendered) return;
+      rendered = true;
+      for (const change of auditChanges(entry)) {
         const row = document.createElement("li");
         row.textContent = `${change.label}：${change.from ? `${change.from} → ` : ""}${change.to || "已删除"}`;
         list.append(row);
       }
-      details.append(heading, list);
-      item.append(details);
-    }
+      if (!list.childElementCount) {
+        const empty = document.createElement("li");
+        empty.textContent = "没有可显示的字段变化。";
+        list.append(empty);
+      }
+    });
+    details.append(heading, list);
+    item.append(details);
     return item;
   }));
 }
