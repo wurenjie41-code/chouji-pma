@@ -195,6 +195,11 @@ html { scroll-behavior: smooth; }
 .row-history ul { margin: 6px 0 0; padding-left: 16px; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .field-grid .field-label, .time-window-fields .field-label { display: grid; gap: 6px; }
+.image-reference { display: grid; gap: 5px; padding: 11px; border: 1px solid #e2e9e5; border-radius: 14px; background: #f8faf9; }
+.image-reference > .field-label { margin: 0; }
+.image-preview-wrap { display: grid; justify-items: start; gap: 8px; }
+.image-preview-wrap img { display: block; max-width: 100%; max-height: 260px; object-fit: contain; border: 1px solid #e1e7e3; border-radius: 10px; background: #fff; }
+.image-preview-wrap .secondary-button { min-height: 36px; }
 .time-window-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .subsection-heading .secondary-button { min-height: 34px; }
 .analysis-dimension-label { display: grid; gap: 6px; margin: 10px 0; color: var(--muted); font-size: 10px; }
@@ -250,3 +255,4 @@ html { scroll-behavior: smooth; }
   .sheet-dialog { margin: auto; border-radius: 24px; }
   .sheet-content { padding-bottom: 25px; }
 }
+
