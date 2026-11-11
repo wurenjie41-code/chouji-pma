@@ -1,4 +1,6 @@
-# 筹记 PWA V1 本机数据模型
+# 筹记 PWA 本机数据模型
+
+本文前面的“V1 资金流水”一节描述历史 payload。当前运行时使用状态 `schemaVersion: 2`；旧账本解锁后仅在内存补齐新字段，第一次成功保存时才生成含新字段的密文状态。数据库 stores 与加密 envelope 版本不变，旧记录不会被自动删除或推断结算状态。
 
 ## IndexedDB
 
@@ -62,3 +64,32 @@ V1 为单账本、单币种 CNY；所有金额用整数分保存，不以浮点�
 
 多币种、多账本、转账、外部赛事/赔率 API、云同步和 OCR。滚动快照与 IndexedDB 共用相同来源存储；只有主动保存并保管导出的加密文件才形成独立副本。口令丢失且无可用密钥时无法解密。
 
+## 当前状态 schema 2
+
+状态顶层包含 `schemaVersion: 2`、`sequence`、`createdAt`、旧版 `records[]`、新增 `wagers[]`、`riskSettings` 和最多 500 条 `auditLog[]`。账户存取、奖金和独立退款继续存入现有 `records[]`；不新建第二套现金流水，避免同一笔存取或返还重复计账。`cashTransactions[]` 并不存在于当前实现。
+
+旧记录保留原字段。`stake` 和 `payout` 仍作为未关联历史显示，无法判断它们对应哪注或是否已结算。旧 `refund` 没有 `legacyType` 时继续按旧版未关联盈亏处理；新建独立退款写 `legacyType: false`，只进入资金变化，不进入旧投注净结果。新建旧版 stake/payout 被禁止；历史行仍可编辑和删除以便纠错。
+
+### 逐注投注 `wagers[]`
+
+每条记录包含：
+
+| 字段 | 存储口径 |
+|---|---|
+| `placedAt`, `settledAt` | ISO 时间戳；未结算时 `settledAt: null` |
+| `event`, `sport`, `league`, `market`, `platform` | 用户填写的事件和分类文字 |
+| `oddsMilli` | 十进制赔率乘 1000 后的整数，未填为 `null` |
+| `stakeMinor`, `actualReturnMinor`, `feeMinor` | CNY 整数分；未结算时返还为空、手续费为 0 |
+| `combo`, `status`, `result` | 单关/串关；open、won、lost、void、cashout；赛果文字 |
+| `tags`, `note`, `beforeState`, `source` | 标签、备注、下注前状态、来源；当前来源为 `manual` |
+| `id`, `createdAt`, `updatedAt` | UUID 与创建/修改时间 |
+
+`wagerResult = actualReturnMinor - stakeMinor - feeMinor`。ROI 只计入已结算且非作废投注：`ROI = 已结算投注净结果 ÷ 已结算投注额`。作废注不计入 ROI 分子或分母，但实际返还仍计入资金变化。未结算投注不计返还或净结果，未结算本金独立展示为资金敞口。每注返还不再另建 payout 流水。
+
+### 风险设置 `riskSettings`
+
+包含 `period`（monthly/weekly）、`budgetMinor`、`lossLimitMinor`、`maxStakeMinor`、可选 `allowedStart`/`allowedEnd`、`cooloffUntil` 和 `stoppedPeriodKey`。金额上限默认为空，由用户设置；本周期已有投注后不允许提高/取消金额上限或放宽时段。预算按投注日期累计本金，赢款不返还额度。亏损风险占用把当期已结算净亏损与未结算本金合并用于拦截，文案明确未结算本金不是已发生亏损。硬限制仅作用于应用内新增投注。
+
+### 审计历史与备份
+
+投注、流水和风险设置修改都会进入加密 payload 的 `auditLog[]`，保存时间、实体 ID、操作及前后值，最多保留 500 条。密文备份格式仍为版本 1；导入时解密后补齐旧字段并校验金额、状态、字段类型及快照。备份导入只写入空账本。浏览器内快照可能随本机网站数据一起丢失，需另行导出密文文件。

@@ -5,26 +5,34 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const screens = { vault: $("#vault-screen"), ledger: $("#ledger-screen") };
 const forms = { create: $("#create-vault-form"), unlock: $("#unlock-form"), entry: $("#entry-form") };
 const dialog = $("#entry-dialog");
+const wagerDialog = $("#wager-dialog");
 const backupDialog = $("#backup-import-dialog");
 const TYPE = {
   stake: { label: "投注支出", delta: -1, color: "out", group: "bet" },
   payout: { label: "派彩返还", delta: 1, color: "in", group: "bet" },
   deposit: { label: "账户存入", delta: 1, color: "in", group: "movement" },
   withdrawal: { label: "账户取出", delta: -1, color: "out", group: "movement" },
-  refund: { label: "退款 / 退回", delta: 1, color: "in", group: "bet" },
+  refund: { label: "独立退款 / 退回", delta: 1, color: "in", group: "movement" },
+  bonus: { label: "奖金 / 赠金", delta: 1, color: "in", group: "movement" },
 };
-const PAGES = ["overview", "records", "analysis"];
+const WAGER_STATUS = { open: "未结算", won: "已结算 · 赢", lost: "已结算 · 输", void: "已作废 / 退回", cashout: "提前结算 / 其他结算" };
+const PAGES = ["overview", "records", "analysis", "risk"];
 
 let session = null;
 let deferredInstallPrompt = null;
 let saveBusy = false;
 let editingRecordId = null;
+let editingWagerId = null;
 let persistentStorageRequest;
 let lockPending = false;
 let activePage = "overview";
 let activeFilter = "all";
 let activePeriod = "7";
 let pendingBackup = null;
+let activeWagerFilter = "all";
+let analysisDateBasis = "placed";
+let activeAnalysisPeriod = "month";
+let activeWagerDrilldown = null;
 
 function formatMoney(minor) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(minor / 100);
@@ -61,6 +69,7 @@ function showLedger() {
 function lockApp() {
   session = null;
   if (dialog.open) dialog.close();
+  if (wagerDialog.open) wagerDialog.close();
   showVault(false);
 }
 
@@ -79,12 +88,67 @@ function recordsInPeriod(period) {
   return records.filter((record) => record.date >= start && record.date <= end);
 }
 
+function localDateFromTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function periodInfo(dateValue, period = session?.state.riskSettings?.period ?? "monthly") {
+  const date = new Date(`${dateValue}T12:00:00`);
+  if (period === "weekly") {
+    const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7));
+    const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
+    const start = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, "0")}-${String(monday.getDate()).padStart(2, "0")}`;
+    const end = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, "0")}-${String(sunday.getDate()).padStart(2, "0")}`;
+    return { key: start, start, end, label: `本周（${formatDate(start)}–${formatDate(end)}）` };
+  }
+  const start = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const end = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { key: start.slice(0, 7), start, end, label: `${date.getFullYear()} 年 ${date.getMonth() + 1} 月` };
+}
+
+function currentPeriodInfo(period) { return periodInfo(localDateInput(), period); }
+function wagerResult(wager) { return wager.status === "open" ? null : wager.actualReturnMinor - wager.stakeMinor - wager.feeMinor; }
+function isSettledForRoi(wager) { return wager.status !== "open" && wager.status !== "void"; }
+function wagerDate(wager, basis = "placed") { return localDateFromTimestamp(basis === "settled" ? wager.settledAt : wager.placedAt); }
+
+function wagerMetrics(wagers) {
+  const eligible = wagers.filter(isSettledForRoi);
+  const settledNet = eligible.reduce((sum, wager) => sum + wagerResult(wager), 0);
+  const settledStake = eligible.reduce((sum, wager) => sum + wager.stakeMinor, 0);
+  const returned = wagers.filter((wager) => wager.status !== "open").reduce((sum, wager) => sum + wager.actualReturnMinor, 0);
+  const openStake = wagers.filter((wager) => wager.status === "open").reduce((sum, wager) => sum + wager.stakeMinor, 0);
+  const fees = eligible.reduce((sum, wager) => sum + wager.feeMinor, 0);
+  const actualNet = wagers.filter((wager) => wager.status !== "open").reduce((sum, wager) => sum + wagerResult(wager), 0);
+  return { settledNet, settledStake, returned, openStake, actualNet, fees, count: wagers.length, settledCount: eligible.length, roi: settledStake ? settledNet / settledStake * 100 : null };
+}
+
+function appendAudit(state, entity, id, action, before, after) {
+  const entry = { id: crypto.randomUUID(), entity, entityId: id, action, at: new Date().toISOString(), before: before ? structuredClone(before) : null, after: after ? structuredClone(after) : null };
+  return [...(state.auditLog ?? []), entry].slice(-500);
+}
+
+function describeAuditValue(entity, value) {
+  if (!value) return "已删除";
+  if (entity === "wager") return `${value.event} · ${formatMoney(value.stakeMinor)} · ${WAGER_STATUS[value.status] ?? value.status}${value.status === "open" ? "" : ` · 净结果 ${formatMoney(wagerResult(value))}`}`;
+  if (entity === "record") return `${TYPE[value.kind]?.label ?? "流水"} · ${formatMoney(value.amountMinor)} · ${formatDate(value.date, true)}`;
+  if (entity === "settings") return `周期 ${value.period === "weekly" ? "自然周" : "法定月"} · 预算 ${value.budgetMinor == null ? "未设置" : formatMoney(value.budgetMinor)} · 亏损上限 ${value.lossLimitMinor == null ? "未设置" : formatMoney(value.lossLimitMinor)} · 单笔上限 ${value.maxStakeMinor == null ? "未设置" : formatMoney(value.maxStakeMinor)}`;
+  return "保护操作";
+}
+
 function calculate(records) {
-  const betRecords = records.filter((record) => TYPE[record.kind]?.group === "bet");
+  const betRecords = records.filter(isLegacyBetRecord);
   const net = betRecords.reduce((sum, record) => sum + record.deltaMinor, 0);
   const stake = betRecords.filter((record) => record.kind === "stake").reduce((sum, record) => sum + record.amountMinor, 0);
   const returned = betRecords.filter((record) => ["payout", "refund"].includes(record.kind)).reduce((sum, record) => sum + record.amountMinor, 0);
   return { net, stake, returned, count: records.length };
+}
+
+function isLegacyBetRecord(record) {
+  return ["stake", "payout"].includes(record.kind) || (record.kind === "refund" && record.legacyType !== false);
 }
 
 function setPage(page) {
@@ -140,30 +204,197 @@ function createEntryRow(record, withActions = true) {
   return row;
 }
 
+function createWagerRow(wager, withActions = true) {
+  const row = document.createElement("li");
+  row.className = "entry-row wager-row";
+  const mark = document.createElement("span");
+  mark.className = `entry-mark ${wager.status === "open" ? "pending" : wagerResult(wager) < 0 ? "out" : "in"}`;
+  mark.textContent = wager.status === "open" ? "…" : wager.status === "lost" ? "−" : wager.status === "won" ? "+" : "✓";
+  const details = document.createElement("div");
+  details.className = "entry-details";
+  const title = document.createElement("strong");
+  title.textContent = wager.event;
+  const meta = [wager.sport, wager.league, wager.market, wager.platform, wager.combo === "parlay" ? "串关" : "单关", WAGER_STATUS[wager.status], wager.source === "image" ? "图片识别" : "手工录入", wager.result].filter(Boolean).join(" · ");
+  const subtitle = document.createElement("span");
+  subtitle.textContent = `${formatDate(localDateFromTimestamp(wager.placedAt), true)} · ${meta}`;
+  const detail = document.createElement("span");
+  detail.className = "wager-detail";
+  const odds = wager.oddsMilli == null ? "赔率未填" : `赔率 ${(wager.oddsMilli / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
+  detail.textContent = wager.status === "open"
+    ? `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 未结算${wager.note ? ` · ${wager.note}` : ""}`
+    : `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 返还 ${formatMoney(wager.actualReturnMinor)} · 手续费 ${formatMoney(wager.feeMinor)} · ${wager.settledAt ? `结算 ${formatDate(localDateFromTimestamp(wager.settledAt), true)}` : ""}${wager.note ? ` · ${wager.note}` : ""}`;
+  details.append(title, subtitle, detail);
+  const amount = document.createElement("strong");
+  amount.className = `entry-amount ${wager.status === "open" ? "pending" : wagerResult(wager) < 0 ? "out" : "in"}`;
+  amount.textContent = wager.status === "open" ? `未结算 ${formatMoney(wager.stakeMinor)}` : formatMoney(wagerResult(wager));
+  row.append(mark, details, amount);
+  if (withActions) {
+    const actions = document.createElement("div");
+    actions.className = "entry-actions";
+    const edit = document.createElement("button");
+    edit.className = "entry-action";
+    edit.type = "button";
+    edit.dataset.editWagerId = wager.id;
+    edit.textContent = wager.status === "open" ? "结算 / 编辑" : "查看 / 编辑";
+    const remove = document.createElement("button");
+    remove.className = "entry-action destructive";
+    remove.type = "button";
+    remove.dataset.deleteWagerId = wager.id;
+    remove.textContent = "删除";
+    actions.append(edit, remove);
+    row.append(actions);
+  }
+  const history = session.state.auditLog.filter((item) => item.entity === "wager" && item.entityId === wager.id);
+  if (history.length) {
+    const detailsLog = document.createElement("details");
+    detailsLog.className = "row-history";
+    const summary = document.createElement("summary");
+    summary.textContent = `修改记录 ${history.length}`;
+    const list = document.createElement("ul");
+    for (const item of history.slice().reverse()) {
+      const line = document.createElement("li");
+      line.textContent = `${new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.at))} · ${item.action === "create" ? "新增" : item.action === "delete" ? "删除" : "编辑"}`;
+      list.append(line);
+    }
+    detailsLog.append(summary, list);
+    row.append(detailsLog);
+  }
+  return row;
+}
+
+function currentCycleData() {
+  const info = currentPeriodInfo();
+  const wagers = session.state.wagers.filter((wager) => {
+    const date = localDateFromTimestamp(wager.placedAt);
+    return date >= info.start && date <= info.end;
+  });
+  const legacy = session.state.records.filter((record) => record.kind === "stake" && record.date >= info.start && record.date <= info.end);
+  const legacyBetLines = session.state.records.filter((record) => isLegacyBetRecord(record) && record.date >= info.start && record.date <= info.end);
+  const legacyNet = calculate(legacyBetLines).net;
+  const metrics = wagerMetrics(wagers);
+  const riskExposure = Math.max(0, -metrics.actualNet) + Math.max(0, -legacyNet) + metrics.openStake;
+  const legacyBudget = legacy.reduce((sum, item) => sum + item.amountMinor, 0);
+  const wagerBudget = wagers.reduce((sum, item) => sum + item.stakeMinor, 0);
+  const maxLegacyStake = legacy.reduce((maximum, item) => Math.max(maximum, item.amountMinor), 0);
+  const maxWagerStake = wagers.reduce((maximum, item) => Math.max(maximum, item.stakeMinor), 0);
+  const maxRecordedStake = Math.max(maxLegacyStake, maxWagerStake);
+  return { info, wagers, legacy, legacyNet, metrics, riskExposure, maxRecordedStake, budgetUsed: legacyBudget + wagerBudget };
+}
+
+function renderWagerTrend(container, wagers) {
+  const groups = new Map();
+  for (let offset = 6; offset >= 0; offset--) {
+    const day = localDateInput(-offset);
+    groups.set(day, { net: 0, has: false });
+  }
+  for (const wager of wagers) {
+    const day = localDateFromTimestamp(wager.placedAt);
+    if (!groups.has(day) || !isSettledForRoi(wager)) continue;
+    const row = groups.get(day);
+    row.net += wagerResult(wager);
+    row.has = true;
+  }
+  const values = [...groups.values()];
+  const max = Math.max(1, ...values.map((item) => Math.abs(item.net)));
+  container.replaceChildren();
+  for (const [day, item] of groups) {
+    const row = document.createElement("div");
+    row.className = "trend-row";
+    const label = document.createElement("span");
+    label.className = "trend-label";
+    label.textContent = formatDate(day);
+    const track = document.createElement("span");
+    track.className = "trend-track";
+    const bar = document.createElement("progress");
+    bar.className = `trend-bar ${item.net < 0 ? "loss" : "gain"}`;
+    bar.max = 100;
+    bar.value = item.has ? Math.max(4, Math.abs(item.net) / max * 100) : 0;
+    track.append(bar);
+    const amount = document.createElement("strong");
+    amount.className = `trend-value ${item.net < 0 ? "negative" : ""}`;
+    amount.textContent = item.has ? formatMoney(item.net) : "—";
+    row.append(label, track, amount);
+    container.append(row);
+  }
+}
+
 function renderOverview() {
-  const allRecords = session.state.records;
-  const totals = calculate(allRecords);
-  $("#net-total").textContent = formatMoney(totals.net);
-  $("#net-total").classList.toggle("negative", totals.net < 0);
-  $("#stake-total").textContent = formatMoney(allRecords.filter((r) => r.kind === "stake").reduce((sum, r) => sum + r.amountMinor, 0));
-  $("#return-total").textContent = formatMoney(allRecords.filter((r) => ["payout", "refund"].includes(r.kind)).reduce((sum, r) => sum + r.amountMinor, 0));
-  $("#entry-count").textContent = String(allRecords.length);
+  const { info, wagers, metrics, riskExposure, budgetUsed } = currentCycleData();
+  const settings = session.state.riskSettings;
+  $("#hero-caption").textContent = `${info.label}已结算投注净结果（按投注日期）`;
+  $("#budget-period-title").textContent = settings.period === "weekly" ? "本周预算" : "本月预算";
+  $("#settled-net").textContent = formatMoney(metrics.settledNet);
+  $("#settled-net").classList.toggle("negative", metrics.settledNet < 0);
+  $("#settled-stake").textContent = formatMoney(metrics.settledStake);
+  $("#open-stake").textContent = formatMoney(metrics.openStake);
+  $("#open-count").textContent = `${wagers.filter((wager) => wager.status === "open").length} 笔`;
+  $("#settled-roi").textContent = metrics.roi == null ? "—" : `${metrics.roi.toFixed(1)}%`;
+  const budget = settings.budgetMinor;
+  $("#budget-used").textContent = formatMoney(budgetUsed);
+  $("#budget-left").textContent = budget == null ? "—" : formatMoney(budget - budgetUsed);
+  $("#budget-remaining").textContent = budget == null ? "未设置" : `${formatMoney(budget - budgetUsed)} 剩余`;
+  $("#budget-remaining").classList.toggle("negative", budget != null && budgetUsed >= budget);
+  $("#budget-progress").value = budget ? Math.min(100, budgetUsed / budget * 100) : 0;
+  $("#budget-caption").textContent = `${info.label} · 按投注日期累计本金，赢款不会增加可用预算。${budget == null ? "请在“保护”中设置。" : ""}`;
 
-  const weekRecords = recordsInPeriod("7");
-  const weekTotals = calculate(weekRecords);
-  $("#week-net").textContent = formatMoney(weekTotals.net);
-  $("#week-net").classList.toggle("negative", weekTotals.net < 0);
-  $("#week-stake").textContent = formatMoney(weekTotals.stake);
-  $("#week-return").textContent = formatMoney(weekTotals.returned);
-  renderTrend($("#week-chart"), weekRecords, "7", true);
+  const cycleRecords = session.state.records.filter((record) => record.date >= info.start && record.date <= info.end);
+  const legacyBetLines = cycleRecords.filter(isLegacyBetRecord);
+  $("#legacy-result-card").classList.toggle("hidden", legacyBetLines.length === 0);
+  $("#legacy-cycle-net").textContent = formatMoney(calculate(legacyBetLines).net);
+  const deposits = cycleRecords.filter((record) => record.kind === "deposit").reduce((sum, record) => sum + record.amountMinor, 0);
+  const withdrawals = cycleRecords.filter((record) => record.kind === "withdrawal").reduce((sum, record) => sum + record.amountMinor, 0);
+  const wagerCashChange = wagers.reduce((sum, wager) => sum - wager.stakeMinor + (wager.status === "open" ? 0 : wager.actualReturnMinor - wager.feeMinor), 0);
+  const legacyCashChange = cycleRecords.reduce((sum, record) => sum + record.deltaMinor, 0);
+  $("#deposit-total").textContent = formatMoney(deposits);
+  $("#withdrawal-total").textContent = formatMoney(withdrawals);
+  $("#net-deposits").textContent = formatMoney(deposits - withdrawals);
+  $("#wager-cash-change").textContent = formatMoney(wagerCashChange);
+  $("#fund-change").textContent = formatMoney(legacyCashChange + wagerCashChange);
+  $("#fund-change").classList.toggle("negative", legacyCashChange + wagerCashChange < 0);
 
-  const sorted = [...allRecords].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
-  $("#overview-empty-state").classList.toggle("hidden", sorted.length !== 0);
+  const sevenDays = session.state.wagers.filter((wager) => {
+    const date = localDateFromTimestamp(wager.placedAt);
+    return date >= localDateInput(-6) && date <= localDateInput();
+  });
+  const sevenMetrics = wagerMetrics(sevenDays);
+  $("#week-net").textContent = formatMoney(sevenMetrics.settledNet);
+  $("#week-net").classList.toggle("negative", sevenMetrics.settledNet < 0);
+  $("#week-stake").textContent = formatMoney(sevenMetrics.settledStake);
+  $("#week-return").textContent = formatMoney(sevenMetrics.returned);
+  renderWagerTrend($("#week-chart"), sevenDays);
+  const sortedWagers = [...session.state.wagers].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
+  const oldRecords = [...session.state.records].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  $("#overview-empty-state").classList.toggle("hidden", sortedWagers.length + oldRecords.length > 0);
   const recent = $("#overview-recent-list");
-  recent.replaceChildren(...sorted.slice(0, 4).map((record) => createEntryRow(record)));
+  const rows = sortedWagers.slice(0, 4).map((wager) => createWagerRow(wager));
+  if (rows.length < 4) rows.push(...oldRecords.slice(0, 4 - rows.length).map((record) => createEntryRow(record)));
+  recent.replaceChildren(...rows);
 }
 
 function renderRecords() {
+  const allWagers = [...session.state.wagers].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
+  updateRecentOptions(allWagers);
+  const query = $("#wager-search").value.trim().toLocaleLowerCase("zh-CN");
+  const wagers = allWagers.filter((wager) => {
+    const statusMatch = activeWagerFilter === "all" || (activeWagerFilter === "open" ? wager.status === "open" : wager.status !== "open");
+    const searchable = [wager.event, wager.sport, wager.league, wager.market, wager.platform, wager.result, wager.beforeState, wager.note, wager.oddsMilli == null ? "" : wager.oddsMilli / 1000, ...(wager.tags ?? [])].join(" ").toLocaleLowerCase("zh-CN");
+    const queryMatch = !query || searchable.includes(query);
+    const drilldown = activeWagerDrilldown;
+    const drilldownMatch = !drilldown || (wagerDate(wager, drilldown.dateBasis) >= drilldown.range.start
+      && wagerDate(wager, drilldown.dateBasis) <= drilldown.range.end
+      && analysisGroup(wager, drilldown.dimension, drilldown.dateBasis) === drilldown.value);
+    return statusMatch && queryMatch && drilldownMatch;
+  });
+  $("#wager-count").textContent = `${wagers.length} 笔投注 · 未结算 ${allWagers.filter((wager) => wager.status === "open").length} 笔${activeWagerDrilldown ? ` · 分析筛选：${activeWagerDrilldown.value}` : ""}`;
+  $("#clear-wager-drilldown").classList.toggle("hidden", !activeWagerDrilldown);
+  $("#wager-empty-state").classList.toggle("hidden", wagers.length > 0);
+  $("#wager-list").replaceChildren(...wagers.map((wager) => createWagerRow(wager)));
+  $$(`[data-wager-filter]`).forEach((button) => {
+    const selected = button.dataset.wagerFilter === activeWagerFilter;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+
   const all = [...session.state.records].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
   const filtered = activeFilter === "all" ? all : all.filter((record) => activeFilter === "movement" ? TYPE[record.kind]?.group === "movement" : record.kind === activeFilter);
   $("#records-count").textContent = activeFilter === "all" ? `共 ${all.length} 笔记录` : `当前筛选 ${filtered.length} / ${all.length} 笔`;
@@ -181,24 +412,181 @@ function renderRecords() {
   });
 }
 
+function updateRecentOptions(wagers) {
+  for (const [selector, field] of [["#sports-options", "sport"], ["#league-options", "league"], ["#platform-options", "platform"]]) {
+    const values = [...new Set(wagers.map((wager) => wager[field]?.trim()).filter(Boolean))].slice(0, 20);
+    $(selector).replaceChildren(...values.map((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      return option;
+    }));
+  }
+}
+
+function analysisRange() {
+  const today = localDateInput();
+  if (activeAnalysisPeriod === "all") return { start: "0000-01-01", end: "9999-12-31", label: "全部记录" };
+  if (activeAnalysisPeriod === "custom") {
+    const start = $("#analysis-start").value;
+    const end = $("#analysis-end").value;
+    if (start && end && start <= end) return { start, end, label: `${formatDate(start, true)}–${formatDate(end, true)}` };
+    return { start: "9999-01-01", end: "0000-01-01", label: "请设置有效日期范围" };
+  }
+  const period = periodInfo(today, activeAnalysisPeriod === "week" ? "weekly" : "monthly");
+  return { start: period.start, end: today, label: activeAnalysisPeriod === "week" ? "本周至今" : "本月至今" };
+}
+
+function analysisGroup(wager, dimension, dateBasis = analysisDateBasis) {
+  if (dimension === "odds") {
+    if (!wager.oddsMilli) return "未填写赔率";
+    const odds = wager.oddsMilli / 1000;
+    if (odds < 1.5) return "1.00–1.49";
+    if (odds < 2) return "1.50–1.99";
+    if (odds < 3) return "2.00–2.99";
+    if (odds < 5) return "3.00–4.99";
+    return "5.00 及以上";
+  }
+  if (dimension === "hour") {
+    const timestamp = dateBasis === "settled" ? wager.settledAt : wager.placedAt;
+    if (!timestamp) return "未填写时间";
+    const hour = new Date(timestamp).getHours();
+    return hour < 6 ? "00–05 时" : hour < 12 ? "06–11 时" : hour < 18 ? "12–17 时" : "18–23 时";
+  }
+  if (dimension === "weekday") {
+    const names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    const timestamp = dateBasis === "settled" ? wager.settledAt : wager.placedAt;
+    if (!timestamp) return "未填写时间";
+    return names[new Date(timestamp).getDay()];
+  }
+  const value = { sport: wager.sport, league: wager.league, market: wager.market, platform: wager.platform }[dimension];
+  return value?.trim() || "未填写";
+}
+
+function renderWagerAnalysisTrend(wagers, range) {
+  const monthly = activeAnalysisPeriod === "all" || (range.start && range.end && new Date(range.end) - new Date(range.start) > 90 * 86400000);
+  const groups = new Map();
+  for (const wager of wagers) {
+    if (!isSettledForRoi(wager)) continue;
+    const day = wagerDate(wager, analysisDateBasis);
+    if (!day) continue;
+    const key = monthly ? day.slice(0, 7) : day;
+    const item = groups.get(key) ?? { net: 0, count: 0 };
+    item.net += wagerResult(wager);
+    item.count += 1;
+    groups.set(key, item);
+  }
+  const rows = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const maximum = Math.max(1, ...rows.map(([, item]) => Math.abs(item.net)));
+  const container = $("#analysis-trend");
+  container.replaceChildren();
+  for (const [key, item] of rows) {
+    const row = document.createElement("div");
+    row.className = "trend-row";
+    const label = document.createElement("span");
+    label.className = "trend-label";
+    label.textContent = monthly ? formatMonth(key) : formatDate(key);
+    const track = document.createElement("span");
+    track.className = "trend-track";
+    const bar = document.createElement("progress");
+    bar.className = `trend-bar ${item.net < 0 ? "loss" : "gain"}`;
+    bar.max = 100;
+    bar.value = Math.max(4, Math.abs(item.net) / maximum * 100);
+    track.append(bar);
+    const value = document.createElement("strong");
+    value.className = `trend-value ${item.net < 0 ? "negative" : ""}`;
+    value.textContent = formatMoney(item.net);
+    row.append(label, track, value);
+    container.append(row);
+  }
+  $("#trend-title").textContent = monthly ? "每月已结算净结果" : "每日已结算净结果";
+  $("#analysis-no-trend").classList.toggle("hidden", rows.length > 0);
+}
+
+function renderWagerBreakdown(wagers) {
+  const dimension = $("#analysis-dimension").value;
+  const groups = new Map();
+  for (const wager of wagers) {
+    const key = analysisGroup(wager, dimension);
+    const item = groups.get(key) ?? { count: 0, stake: 0, net: 0, settledCount: 0, start: "", end: "" };
+    item.count += 1;
+    const day = wagerDate(wager, analysisDateBasis);
+    if (day) {
+      item.start = !item.start || day < item.start ? day : item.start;
+      item.end = !item.end || day > item.end ? day : item.end;
+    }
+    if (isSettledForRoi(wager)) {
+      item.settledCount += 1;
+      item.stake += wager.stakeMinor;
+      item.net += wagerResult(wager);
+    }
+    groups.set(key, item);
+  }
+  const list = $("#type-breakdown");
+  list.replaceChildren();
+  const sorted = [...groups.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 12);
+  $("#breakdown-empty").classList.toggle("hidden", sorted.length > 0);
+  for (const [label, item] of sorted) {
+    const row = document.createElement("div");
+    row.className = "breakdown-row";
+    const heading = document.createElement("div");
+    heading.className = "breakdown-heading";
+    const name = document.createElement("button");
+    name.className = "drilldown-button";
+    name.type = "button";
+    name.dataset.wagerDimension = dimension;
+    name.dataset.wagerValue = label;
+    name.textContent = `${label} · ${item.count} 笔`;
+    const stats = document.createElement("strong");
+    const roi = item.stake ? `${(item.net / item.stake * 100).toFixed(1)}%` : "—";
+    stats.textContent = `结算额 ${formatMoney(item.stake)} · ROI ${roi}`;
+    heading.append(name, stats);
+    const result = document.createElement("span");
+    result.className = `breakdown-result ${item.net < 0 ? "negative" : ""}`;
+    const span = item.start ? `${formatDate(item.start, true)}${item.start === item.end ? "" : `–${formatDate(item.end, true)}`}` : "无日期范围";
+    result.textContent = `${item.settledCount ? `净结果 ${formatMoney(item.net)} · 已结算 ${item.settledCount}${item.settledCount < 30 ? " · 样本少" : ""}` : "尚无已结算投注"} · 覆盖 ${span}`;
+    row.append(heading, result);
+    list.append(row);
+  }
+}
+
 function renderAnalysis() {
-  const records = recordsInPeriod(activePeriod);
-  const totals = calculate(records);
-  $("#analysis-net").textContent = formatMoney(totals.net);
-  $("#analysis-net").classList.toggle("negative", totals.net < 0);
-  $("#analysis-stake").textContent = formatMoney(totals.stake);
-  $("#analysis-return").textContent = formatMoney(totals.returned);
-  $("#analysis-rate").textContent = totals.stake === 0 ? "—" : `${(totals.net / totals.stake * 100).toFixed(1)}%`;
-  $("#analysis-rate").classList.toggle("negative", totals.net < 0);
-  const periodLabel = activePeriod === "all" ? "全部记录" : `近 ${activePeriod} 天`;
-  $("#trend-title").textContent = activePeriod === "all" ? "每月净结果" : "每日净结果";
-  $("#analysis-trend").classList.toggle("hidden", !records.some((record) => TYPE[record.kind]?.group === "bet"));
-  $("#analysis-no-trend").classList.toggle("hidden", records.some((record) => TYPE[record.kind]?.group === "bet"));
-  renderTrend($("#analysis-trend"), records, activePeriod, false);
-  renderBreakdown(records);
-  $("#analysis-period-label").textContent = `${periodLabel} · ${records.length} 笔流水`;
+  const range = analysisRange();
+  const wagers = session.state.wagers.filter((wager) => {
+    const date = wagerDate(wager, analysisDateBasis);
+    return date && date >= range.start && date <= range.end;
+  });
+  const metrics = wagerMetrics(wagers);
+  $("#analysis-net").textContent = formatMoney(metrics.settledNet);
+  $("#analysis-net").classList.toggle("negative", metrics.settledNet < 0);
+  $("#analysis-stake").textContent = formatMoney(metrics.settledStake);
+  $("#analysis-return").textContent = formatMoney(metrics.returned);
+  $("#analysis-rate").textContent = metrics.roi == null ? "—" : `${metrics.roi.toFixed(1)}%`;
+  $("#analysis-rate").classList.toggle("negative", metrics.settledNet < 0);
+  $("#analysis-open").textContent = formatMoney(metrics.openStake);
+  $("#analysis-count").textContent = String(metrics.count);
+  $("#analysis-period-label").textContent = `${range.label} · ${analysisDateBasis === "placed" ? "按投注日期" : "按结算日期"} · ${metrics.count} 笔投注`;
+  const completenessFields = ["sport", "league", "market", "platform", "oddsMilli"];
+  const fieldCount = wagers.length * completenessFields.length;
+  const completedFields = wagers.reduce((sum, wager) => sum + completenessFields.filter((key) => key === "oddsMilli" ? wager[key] != null : typeof wager[key] === "string" && Boolean(wager[key].trim())).length, 0);
+  const completeness = fieldCount ? `${Math.round(completedFields / fieldCount * 100)}%` : "—";
+  const dates = wagers.map((wager) => wagerDate(wager, analysisDateBasis)).filter(Boolean).sort();
+  const coverage = dates.length ? `${formatDate(dates[0], true)}${dates[0] === dates.at(-1) ? "" : `–${formatDate(dates.at(-1), true)}`}` : "无记录";
+  const sampleWarning = metrics.settledCount < 30 ? `已结算样本 ${metrics.settledCount} 笔，数据不足以评价稳定性。` : `已结算样本 ${metrics.settledCount} 笔。`;
+  $("#analysis-sample-note").textContent = `${sampleWarning}所选字段完整度 ${completeness} · 覆盖 ${coverage} · 历史描述，不代表未来表现。`;
+  $("#analysis-custom-range").classList.toggle("hidden", activeAnalysisPeriod !== "custom");
+  renderWagerAnalysisTrend(wagers, range);
+  renderWagerBreakdown(wagers);
+  const basisDate = analysisDateBasis === "placed" ? (record) => record.date : (record) => record.date;
+  const legacyRecords = session.state.records.filter((record) => basisDate(record) >= range.start && basisDate(record) <= range.end && isLegacyBetRecord(record));
+  const legacyNet = calculate(legacyRecords).net;
+  $("#legacy-analysis-note").textContent = legacyRecords.length ? `另有 ${legacyRecords.length} 笔旧版未关联流水，原始净结果 ${formatMoney(legacyNet)}；因缺少结算状态，未计入新口径 ROI。` : "旧版未关联投注流水不计入以上已结算 ROI。所有统计仅描述本机已有记录，不用于预测结果。";
   $$(`[data-period]`).forEach((button) => {
-    const selected = button.dataset.period === activePeriod;
+    const selected = button.dataset.period === activeAnalysisPeriod;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  $$(`[data-date-basis]`).forEach((button) => {
+    const selected = button.dataset.dateBasis === analysisDateBasis;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
@@ -214,7 +602,7 @@ function renderTrend(container, records, period, compact) {
   }
   const monthly = period === "all";
   for (const record of records) {
-    if (TYPE[record.kind]?.group !== "bet") continue;
+    if (!isLegacyBetRecord(record)) continue;
     const key = monthly ? record.date.slice(0, 7) : record.date;
     const group = groups.get(key) ?? { label: monthly ? formatMonth(key) : formatDate(key), net: 0, hasBetRecord: false };
     group.net += record.deltaMinor;
@@ -292,6 +680,386 @@ function render() {
   renderOverview();
   renderRecords();
   renderAnalysis();
+  renderRisk();
+}
+
+function riskAlerts() {
+  const alerts = [];
+  const { info, wagers, metrics, riskExposure, budgetUsed } = currentCycleData();
+  const settings = session.state.riskSettings;
+  const key = currentPeriodInfo(settings.period).key;
+  if (settings.stoppedPeriodKey === key) alerts.push({ level: "stop", text: "你已选择停止本周期的新增投注记录。下个周期自动解除。" });
+  if (settings.cooloffUntil && new Date(settings.cooloffUntil) > new Date()) alerts.push({ level: "stop", text: `冷静期进行中，至 ${new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(settings.cooloffUntil))}。` });
+  if (settings.budgetMinor != null) {
+    const ratio = budgetUsed / settings.budgetMinor;
+    if (ratio >= 1) alerts.push({ level: "stop", text: `已达到周期预算（${formatMoney(budgetUsed)} / ${formatMoney(settings.budgetMinor)}）；应用内新增投注已锁定。` });
+    else if (ratio >= 0.8) alerts.push({ level: "warn", text: `周期预算已使用 ${(ratio * 100).toFixed(0)}%（${formatMoney(budgetUsed)} / ${formatMoney(settings.budgetMinor)}）。` });
+  }
+  if (settings.lossLimitMinor != null) {
+    const ratio = riskExposure / settings.lossLimitMinor;
+    if (ratio >= 1) alerts.push({ level: "stop", text: `已达到亏损风险上限（含旧版记录估算和未结算本金）：${formatMoney(riskExposure)} / ${formatMoney(settings.lossLimitMinor)}。` });
+    else if (ratio >= 0.8) alerts.push({ level: "warn", text: `当前风险占用已达亏损上限的 ${(ratio * 100).toFixed(0)}%；未结算本金按全额风险展示。` });
+  }
+  if (settings.maxStakeMinor != null) alerts.push({ level: "info", text: `单笔上限为 ${formatMoney(settings.maxStakeMinor)}；超过上限的新增投注会被拒绝。` });
+  if (settings.allowedStart && settings.allowedEnd) {
+    const current = new Date().getHours() * 60 + new Date().getMinutes();
+    const start = Number(settings.allowedStart.slice(0, 2)) * 60 + Number(settings.allowedStart.slice(3));
+    const end = Number(settings.allowedEnd.slice(0, 2)) * 60 + Number(settings.allowedEnd.slice(3));
+    if (!(start <= end ? current >= start && current < end : current >= start || current < end)) alerts.push({ level: "stop", text: `当前时间不在允许记账时段 ${settings.allowedStart}–${settings.allowedEnd}，本工具会拒绝新增投注。` });
+  }
+  const now = Date.now();
+  const recent = session.state.wagers.filter((wager) => {
+    const age = now - new Date(wager.placedAt).getTime();
+    return age >= 0 && age <= 60 * 60 * 1000;
+  });
+  if (recent.length >= 5) alerts.push({ level: "warn", text: `过去 60 分钟记录了 ${recent.length} 笔投注。短暂离开并检查预算，可能有帮助。` });
+  const weekStart = localDateInput(-6);
+  const night = session.state.wagers.filter((wager) => {
+    const date = localDateFromTimestamp(wager.placedAt);
+    const hour = new Date(wager.placedAt).getHours();
+    return date >= weekStart && date <= localDateInput() && hour < 5;
+  });
+  if (night.length >= 3) alerts.push({ level: "warn", text: `最近 7 天有 ${night.length} 笔投注记录在 00:00–04:59。此提醒只反映记录时间。` });
+  const sorted = [...session.state.wagers].sort((a, b) => a.placedAt.localeCompare(b.placedAt));
+  const lastLossIndex = sorted.map((wager, index) => ({ wager, index })).filter(({ wager }) => wager.status !== "open" && wager.status !== "void" && wagerResult(wager) < 0).at(-1);
+  if (lastLossIndex) {
+    const lastLoss = lastLossIndex.wager;
+    const lossTime = new Date(lastLoss.settledAt).getTime();
+    const after = sorted.slice(lastLossIndex.index + 1).find((wager) => {
+      const placed = new Date(wager.placedAt).getTime();
+      return placed >= lossTime && placed - lossTime <= 24 * 60 * 60 * 1000 && wager.stakeMinor >= lastLoss.stakeMinor * 1.5;
+    });
+    if (after) alerts.push({ level: "warn", text: `一笔后续投注（${formatMoney(after.stakeMinor)}）比最近亏损投注（${formatMoney(lastLoss.stakeMinor)}）高出至少 50%，且在 24 小时内。可以考虑暂停。` });
+    const topup = session.state.records.find((record) => record.kind === "deposit" && record.createdAt && new Date(record.createdAt) >= new Date(lossTime) && new Date(record.createdAt) - lossTime <= 6 * 60 * 60 * 1000);
+    if (topup) alerts.push({ level: "warn", text: `最近一次结算亏损后 6 小时内记录过存款（${formatMoney(topup.amountMinor)}）。` });
+  }
+  return alerts;
+}
+
+function renderRisk() {
+  const settings = session.state.riskSettings;
+  const { metrics, riskExposure, budgetUsed, info } = currentCycleData();
+  const currentKey = currentPeriodInfo(settings.period).key;
+  const paused = settings.cooloffUntil && new Date(settings.cooloffUntil) > new Date();
+  const stopped = settings.stoppedPeriodKey === currentKey;
+  const overBudget = settings.budgetMinor != null && budgetUsed >= settings.budgetMinor;
+  const overLoss = settings.lossLimitMinor != null && riskExposure >= settings.lossLimitMinor;
+  $("#risk-status").textContent = paused ? "冷静期进行中" : stopped ? "本周期已停止新增投注" : overBudget || overLoss ? "达到预设上限：已暂停应用内新增投注" : "未触发硬性暂停。请按预设额度记录。";
+  $("#risk-status").className = `risk-status ${paused || stopped || overBudget || overLoss ? "blocked" : ""}`;
+  $("#risk-budget-usage").textContent = settings.budgetMinor == null ? `${formatMoney(budgetUsed)} · 未设上限` : `${formatMoney(budgetUsed)} / ${formatMoney(settings.budgetMinor)}`;
+  $("#risk-budget-remaining").textContent = settings.budgetMinor == null ? "未设置" : formatMoney(settings.budgetMinor - budgetUsed);
+  $("#risk-exposure").textContent = formatMoney(riskExposure);
+  $("#risk-loss-remaining").textContent = settings.lossLimitMinor == null ? "未设置" : formatMoney(settings.lossLimitMinor - riskExposure);
+  $("#risk-loss").textContent = formatMoney(Math.max(0, -metrics.actualNet) + Math.max(0, -currentCycleData().legacyNet));
+  $("#stop-cycle-button").disabled = stopped;
+  $("#stop-cycle-button").textContent = stopped ? "本周期已停止" : `停止${settings.period === "weekly" ? "本周" : "本月"}新增记录`;
+  const alertList = $("#risk-alerts");
+  const alerts = riskAlerts();
+  if (!settings.budgetMinor && !settings.lossLimitMinor && !settings.maxStakeMinor) alerts.push({ level: "info", text: "尚未设置金额上限。可在下方预设适合自己的周期预算、亏损上限和最大单笔。" });
+  if (!alerts.length) alerts.push({ level: "ok", text: "当前记录未触发已配置的提醒。持续遵守预设额度；没有继续下注也是执行计划。" });
+  alertList.replaceChildren(...alerts.map((alert) => {
+    const item = document.createElement("p");
+    item.className = `risk-alert ${alert.level}`;
+    item.textContent = alert.text;
+    return item;
+  }));
+  $("#risk-period").value = settings.period;
+  $("#risk-budget-input").value = settings.budgetMinor == null ? "" : (settings.budgetMinor / 100).toFixed(2);
+  $("#risk-loss-input").value = settings.lossLimitMinor == null ? "" : (settings.lossLimitMinor / 100).toFixed(2);
+  $("#risk-max-input").value = settings.maxStakeMinor == null ? "" : (settings.maxStakeMinor / 100).toFixed(2);
+  $("#risk-time-start").value = settings.allowedStart ?? "";
+  $("#risk-time-end").value = settings.allowedEnd ?? "";
+  $("#risk-settings-error").textContent = "";
+  $("#risk-budget-usage").setAttribute("aria-label", `${info.label}预算使用情况`);
+  const auditList = $("#audit-list");
+  const auditItems = [...(session.state.auditLog ?? [])].reverse();
+  auditList.replaceChildren(...auditItems.map((entry) => {
+    const item = document.createElement("li");
+    const at = new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(new Date(entry.at));
+    const action = { create: "新增", edit: "修改", delete: "删除", "stop-period": "停止本周期", "cooloff-24h": "开启 24 小时冷静期", "cooloff-168h": "开启 7 天冷静期" }[entry.action] ?? "更新保护设置";
+    const entity = entry.entity === "wager" ? "投注" : entry.entity === "record" ? "流水" : "保护设置";
+    const before = describeAuditValue(entry.entity, entry.before);
+    const after = describeAuditValue(entry.entity, entry.after);
+    item.textContent = `${at} · ${action}${entity}：${before}${entry.before && entry.after ? ` → ${after}` : entry.after ? `：${after}` : ""}`;
+    return item;
+  }));
+}
+
+function amountInputMinor(value, allowZero = false) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const match = /^(\d{1,9})(?:\.(\d{1,2}))?$/.exec(text);
+  if (!match) return NaN;
+  const minor = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(minor) && (allowZero ? minor >= 0 : minor > 0) ? minor : NaN;
+}
+
+function localDateTimeInput(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function newWagerBlockReasons(stakeMinor) {
+  const settings = session.state.riskSettings;
+  const reasons = [];
+  const now = new Date();
+  const cycle = currentPeriodInfo(settings.period);
+  const data = currentCycleData();
+  if (settings.stoppedPeriodKey === cycle.key) reasons.push("你已停止本周期新增投注记录。");
+  if (settings.cooloffUntil && new Date(settings.cooloffUntil) > now) reasons.push("冷静期尚未结束。");
+  if (settings.maxStakeMinor != null && stakeMinor > settings.maxStakeMinor) reasons.push(`超过单笔上限 ${formatMoney(settings.maxStakeMinor)}。`);
+  if (settings.budgetMinor != null && data.budgetUsed + stakeMinor > settings.budgetMinor) reasons.push(`此笔会超过本周期预算 ${formatMoney(settings.budgetMinor)}。`);
+  if (settings.lossLimitMinor != null && data.riskExposure + stakeMinor > settings.lossLimitMinor) reasons.push("此笔会使亏损风险占用超过预设上限（已实现亏损加未结算本金）。");
+  if (settings.allowedStart && settings.allowedEnd) {
+    const current = now.getHours() * 60 + now.getMinutes();
+    const start = Number(settings.allowedStart.slice(0, 2)) * 60 + Number(settings.allowedStart.slice(3));
+    const end = Number(settings.allowedEnd.slice(0, 2)) * 60 + Number(settings.allowedEnd.slice(3));
+    const inWindow = start <= end ? current >= start && current < end : current >= start || current < end;
+    if (!inWindow) reasons.push(`已超出允许记账时段 ${settings.allowedStart}–${settings.allowedEnd}。`);
+  }
+  return reasons;
+}
+
+async function saveWager(event) {
+  event.preventDefault();
+  if (!session || saveBusy) return;
+  const stakeMinor = amountInputMinor($("#wager-stake").value);
+  if (!Number.isSafeInteger(stakeMinor) || stakeMinor <= 0) return setError("#wager-error", "请输入有效投注金额，最多两位小数。");
+  const status = $("#wager-status").value;
+  const settled = status !== "open";
+  const actualReturnMinor = settled ? amountInputMinor($("#wager-return").value, true) : null;
+  const feeMinor = settled ? (amountInputMinor($("#wager-fee").value || "0", true) ?? 0) : 0;
+  if (settled && (!Number.isSafeInteger(actualReturnMinor) || actualReturnMinor < 0)) return setError("#wager-error", "已结算投注请填写实际返还；输时填 0，返还金额应包含返还本金。");
+  if (settled && (!Number.isSafeInteger(feeMinor) || feeMinor < 0)) return setError("#wager-error", "手续费金额无效。");
+  const placed = new Date($("#wager-placed-at").value);
+  if (Number.isNaN(placed.getTime())) return setError("#wager-error", "请填写有效投注时间。");
+  if (!editingWagerId && placed.getTime() > Date.now() + 5 * 60 * 1000) return setError("#wager-error", "投注时间不能晚于当前时间；请只录入已实际发生的投注。");
+  let settledAt = null;
+  if (settled) {
+    settledAt = new Date($("#wager-settled-at").value || localDateTimeInput());
+    if (Number.isNaN(settledAt.getTime()) || settledAt < placed) return setError("#wager-error", "结算时间无效，且不能早于投注时间。");
+  }
+  const oddsText = $("#wager-odds").value.trim();
+  const odds = oddsText ? Number(oddsText) : null;
+  if (odds != null && (!Number.isFinite(odds) || odds < 1 || odds > 1000)) return setError("#wager-error", "赔率需在 1.000 至 1000 之间，或留空。");
+  if (!editingWagerId) {
+    const blocked = newWagerBlockReasons(stakeMinor);
+    if (blocked.length) return setError("#wager-error", `未保存：${blocked.join(" ")}`);
+  }
+  const current = editingWagerId ? session.state.wagers.find((item) => item.id === editingWagerId) : null;
+  if (editingWagerId && !current) return setError("#wager-error", "该投注记录不存在，请关闭后刷新。");
+  const eventName = $("#wager-event").value.trim();
+  if (!eventName) return setError("#wager-error", "请填写比赛或事件。");
+  if (!current) {
+    const duplicate = session.state.wagers.some((wager) => wager.event.toLocaleLowerCase("zh-CN") === eventName.toLocaleLowerCase("zh-CN")
+      && wager.platform === $("#wager-platform").value.trim() && wager.stakeMinor === stakeMinor
+      && Math.abs(new Date(wager.placedAt) - placed) <= 2 * 60 * 60 * 1000);
+    if (duplicate && !confirm("发现时间、事件、平台和金额相近的投注。仍要新增这笔记录吗？")) return;
+  }
+  const tags = [...new Set($("#wager-tags").value.split(",").map((tag) => tag.trim()).filter(Boolean))].slice(0, 8);
+  const wager = {
+    id: current?.id ?? crypto.randomUUID(),
+    placedAt: placed.toISOString(),
+    event: eventName,
+    sport: $("#wager-sport").value.trim(),
+    league: $("#wager-league").value.trim(),
+    market: $("#wager-market").value.trim(),
+    platform: $("#wager-platform").value.trim(),
+    oddsMilli: odds == null ? null : Math.round(odds * 1000),
+    stakeMinor,
+    combo: $("#wager-combo").value,
+    status,
+    actualReturnMinor,
+    feeMinor,
+    settledAt: settled ? settledAt.toISOString() : null,
+    result: $("#wager-result").value.trim(),
+    tags,
+    note: $("#wager-note").value.trim(),
+    beforeState: $("#wager-state").value.trim(),
+    source: "manual",
+    createdAt: current?.createdAt ?? new Date().toISOString(),
+    ...(current ? { updatedAt: new Date().toISOString() } : {}),
+  };
+  const wagers = current
+    ? session.state.wagers.map((item) => item.id === current.id ? wager : item)
+    : [wager, ...session.state.wagers];
+  let nextState = { ...session.state, sequence: session.state.sequence + 1, wagers };
+  nextState.auditLog = appendAudit(nextState, "wager", wager.id, current ? "edit" : "create", current, wager);
+  saveBusy = true;
+  $("#wager-save-button").disabled = true;
+  try {
+    const health = await commitState(nextState, session.key);
+    session.state = nextState;
+    wagerDialog.close();
+    render();
+    updateHealthDisplay(health);
+    await refreshHealth();
+  } catch (error) {
+    setError("#wager-error", `保存失败，未报告为已保存：${error.message}`);
+  } finally {
+    saveBusy = false;
+    $("#wager-save-button").disabled = false;
+    finishPendingLock();
+  }
+}
+
+function syncSettlementFields() {
+  const settled = $("#wager-status").value !== "open";
+  $("#settlement-fields").classList.toggle("hidden", !settled);
+  $("#wager-return").required = settled;
+  $("#wager-settled-at").required = settled;
+  if (settled && !$("#wager-settled-at").value) $("#wager-settled-at").value = localDateTimeInput();
+  if (!settled) {
+    $("#wager-return").value = "";
+    $("#wager-settled-at").value = "";
+  }
+}
+
+function openNewWager() {
+  editingWagerId = null;
+  $("#wager-form").reset();
+  $("#wager-title").textContent = "记录投注";
+  $("#wager-save-button").textContent = "加密保存投注";
+  $("#wager-placed-at").value = localDateTimeInput();
+  $("#wager-settled-at").value = "";
+  $("#wager-fee").value = "0";
+  setError("#wager-error");
+  syncSettlementFields();
+  wagerDialog.showModal();
+  $("#wager-event").focus();
+}
+
+function openEditWager(id) {
+  const wager = session.state.wagers.find((item) => item.id === id);
+  if (!wager) return;
+  editingWagerId = wager.id;
+  $("#wager-title").textContent = wager.status === "open" ? "投注记录 / 结算" : "编辑已记录投注";
+  $("#wager-save-button").textContent = "加密保存更改";
+  $("#wager-event").value = wager.event;
+  $("#wager-sport").value = wager.sport;
+  $("#wager-league").value = wager.league;
+  $("#wager-market").value = wager.market;
+  $("#wager-platform").value = wager.platform;
+  $("#wager-odds").value = wager.oddsMilli == null ? "" : (wager.oddsMilli / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  $("#wager-stake").value = (wager.stakeMinor / 100).toFixed(2);
+  $("#wager-combo").value = wager.combo ?? "single";
+  $("#wager-status").value = wager.status;
+  $("#wager-placed-at").value = localDateTimeInput(new Date(wager.placedAt));
+  $("#wager-return").value = wager.actualReturnMinor == null ? "" : (wager.actualReturnMinor / 100).toFixed(2);
+  $("#wager-fee").value = (wager.feeMinor / 100).toFixed(2);
+  $("#wager-settled-at").value = wager.settledAt ? localDateTimeInput(new Date(wager.settledAt)) : "";
+  $("#wager-result").value = wager.result ?? "";
+  $("#wager-tags").value = (wager.tags ?? []).join(", ");
+  $("#wager-note").value = wager.note ?? "";
+  $("#wager-state").value = wager.beforeState ?? "";
+  setError("#wager-error");
+  syncSettlementFields();
+  wagerDialog.showModal();
+}
+
+async function deleteWager(id) {
+  if (!session || saveBusy) return;
+  const wager = session.state.wagers.find((item) => item.id === id);
+  if (!wager || !confirm(`删除“${wager.event}” ${formatMoney(wager.stakeMinor)} 的投注记录？本机审计历史会保留删除时间。`)) return;
+  let nextState = { ...session.state, sequence: session.state.sequence + 1, wagers: session.state.wagers.filter((item) => item.id !== id) };
+  nextState.auditLog = appendAudit(nextState, "wager", id, "delete", wager, null);
+  saveBusy = true;
+  try {
+    const health = await commitState(nextState, session.key);
+    session.state = nextState;
+    render();
+    updateHealthDisplay(health);
+    await refreshHealth();
+  } catch (error) { alert(`删除失败：${error.message}`); }
+  finally { saveBusy = false; finishPendingLock(); }
+}
+
+function parseOptionalLimit(selector) {
+  const value = amountInputMinor($(selector).value);
+  if (value === null) return null;
+  return Number.isSafeInteger(value) ? value : NaN;
+}
+
+function windowMinutes(start, end) {
+  if (!start || !end) return null;
+  const parse = (value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+  return (parse(end) - parse(start) + 1440) % 1440;
+}
+
+async function saveRiskSettings(event) {
+  event.preventDefault();
+  if (!session || saveBusy) return;
+  const settings = session.state.riskSettings;
+  const proposed = {
+    ...settings,
+    period: $("#risk-period").value,
+    budgetMinor: parseOptionalLimit("#risk-budget-input"),
+    lossLimitMinor: parseOptionalLimit("#risk-loss-input"),
+    maxStakeMinor: parseOptionalLimit("#risk-max-input"),
+    allowedStart: $("#risk-time-start").value,
+    allowedEnd: $("#risk-time-end").value,
+  };
+  if ([proposed.budgetMinor, proposed.lossLimitMinor, proposed.maxStakeMinor].some(Number.isNaN)) return setError("#risk-settings-error", "金额无效，请用两位小数或留空。");
+  if (Boolean(proposed.allowedStart) !== Boolean(proposed.allowedEnd)) return setError("#risk-settings-error", "允许时段需要同时填写开始和结束时间，或都留空。");
+  if (proposed.allowedStart && proposed.allowedStart === proposed.allowedEnd) return setError("#risk-settings-error", "允许时段的开始和结束不能相同。");
+  if (proposed.period !== settings.period && cycleHasActivity(settings.period)) return setError("#risk-settings-error", "本周期已有记录，预算周期将在下一周期开始后才能切换。");
+  const activity = cycleHasActivity(settings.period);
+  const currentData = currentCycleData();
+  if (activity && settings.budgetMinor == null && proposed.budgetMinor != null && proposed.budgetMinor > currentData.budgetUsed) return setError("#risk-settings-error", `本周期已有投注；首次设定预算不能高于已用额度 ${formatMoney(currentData.budgetUsed)}。`);
+  if (activity && settings.lossLimitMinor == null && proposed.lossLimitMinor != null && currentData.riskExposure > 0 && proposed.lossLimitMinor > currentData.riskExposure) return setError("#risk-settings-error", `本周期已有风险敞口；首次设定亏损上限不能高于当前风险占用 ${formatMoney(currentData.riskExposure)}。`);
+  if (activity && settings.maxStakeMinor == null && proposed.maxStakeMinor != null && currentData.maxRecordedStake > 0 && proposed.maxStakeMinor > currentData.maxRecordedStake) return setError("#risk-settings-error", `本周期已有投注；首次设定单笔上限不能高于已记录最大单笔 ${formatMoney(currentData.maxRecordedStake)}。`);
+  const raised = ["budgetMinor", "lossLimitMinor", "maxStakeMinor"].some((key) => {
+    const oldValue = settings[key], newValue = proposed[key];
+    return oldValue != null && (newValue == null || newValue > oldValue);
+  });
+  const oldWindow = windowMinutes(settings.allowedStart, settings.allowedEnd);
+  const newWindow = windowMinutes(proposed.allowedStart, proposed.allowedEnd);
+  const widened = oldWindow != null && (newWindow == null || newWindow > oldWindow);
+  if (activity && (raised || widened)) return setError("#risk-settings-error", "本周期已有投注记录，不能提高/取消金额上限或放宽时段；可降低上限，放宽设置下周期再生效。");
+  let nextState = { ...session.state, sequence: session.state.sequence + 1, riskSettings: proposed };
+  nextState.auditLog = appendAudit(nextState, "settings", "risk", "edit", settings, proposed);
+  saveBusy = true;
+  try {
+    await commitState(nextState, session.key);
+    session.state = nextState;
+    render();
+    setError("#risk-settings-error", "设置已加密保存。");
+  } catch (error) { setError("#risk-settings-error", `保存失败：${error.message}`); }
+  finally { saveBusy = false; finishPendingLock(); }
+}
+
+function cycleHasActivity(period) {
+  const info = currentPeriodInfo(period);
+  return session.state.wagers.some((wager) => {
+    const date = localDateFromTimestamp(wager.placedAt);
+    return date >= info.start && date <= info.end;
+  }) || session.state.records.some((record) => record.kind === "stake" && record.date >= info.start && record.date <= info.end);
+}
+
+async function stopCycle() {
+  const settings = session.state.riskSettings;
+  const key = currentPeriodInfo(settings.period).key;
+  if (settings.stoppedPeriodKey === key || !confirm("停止本周期在本工具内新增投注记录？此操作不能提前解除，会在下个预算周期开始时自动解除。")) return;
+  await saveRiskAction({ ...settings, stoppedPeriodKey: key }, "stop-period");
+}
+
+async function startCooloff(hours) {
+  const currentUntil = new Date(session.state.riskSettings.cooloffUntil ?? 0).getTime();
+  const until = Math.max(currentUntil, Date.now() + hours * 60 * 60 * 1000);
+  if (!confirm(`开启 ${hours === 24 ? "24 小时" : "7 天"}冷静期？期间本工具会拒绝新增投注记录。`)) return;
+  await saveRiskAction({ ...session.state.riskSettings, cooloffUntil: new Date(until).toISOString() }, `cooloff-${hours}h`);
+}
+
+async function saveRiskAction(settings, action) {
+  if (!session || saveBusy) return;
+  let nextState = { ...session.state, sequence: session.state.sequence + 1, riskSettings: settings };
+  nextState.auditLog = appendAudit(nextState, "settings", "risk", action, session.state.riskSettings, settings);
+  saveBusy = true;
+  try {
+    await commitState(nextState, session.key);
+    session.state = nextState;
+    render();
+  } catch (error) { alert(`保存保护操作失败：${error.message}`); }
+  finally { saveBusy = false; finishPendingLock(); }
 }
 
 async function refreshHealth() {
@@ -342,6 +1110,11 @@ async function saveEntry(event) {
     saveBusy = false;
     return;
   }
+  if (!current && ["stake", "payout"].includes(kind)) {
+    setError("#entry-error", "请用“记录投注”逐注记录新投注。旧版未关联支出和返还只用于保留、纠正历史流水。 ");
+    saveBusy = false;
+    return;
+  }
   const record = {
     id: current?.id ?? crypto.randomUUID(),
     kind,
@@ -350,12 +1123,15 @@ async function saveEntry(event) {
     date,
     note: $("#entry-note").value.trim(),
     createdAt: current?.createdAt ?? new Date().toISOString(),
+    ...(kind === "refund" && !current ? { legacyType: false } : {}),
+    ...(current?.legacyType !== undefined ? { legacyType: current.legacyType } : {}),
     ...(current ? { updatedAt: new Date().toISOString() } : {}),
   };
   const records = current
     ? session.state.records.map((item) => item.id === current.id ? record : item)
     : [record, ...session.state.records];
-  const nextState = { ...session.state, sequence: session.state.sequence + 1, records };
+  let nextState = { ...session.state, sequence: session.state.sequence + 1, records };
+  nextState.auditLog = appendAudit(nextState, "record", record.id, current ? "edit" : "create", current, record);
   try {
     const health = await commitState(nextState, session.key);
     session.state = nextState;
@@ -411,6 +1187,7 @@ async function deleteEntry(recordId) {
       sequence: session.state.sequence + 1,
       records: session.state.records.filter((item) => item.id !== recordId),
     };
+    nextState.auditLog = appendAudit(nextState, "record", recordId, "delete", record, null);
     const health = await commitState(nextState, session.key);
     session.state = nextState;
     render();
@@ -499,15 +1276,49 @@ forms.unlock.addEventListener("submit", async (event) => {
 
 forms.entry.addEventListener("submit", saveEntry);
 $$(`[data-open-form]`).forEach((button) => button.addEventListener("click", openNewEntry));
+$$(`[data-open-wager]`).forEach((button) => button.addEventListener("click", openNewWager));
 $$(`[data-page]`).forEach((button) => button.addEventListener("click", () => setPage(button.dataset.page)));
 $$(`[data-filter]`).forEach((button) => button.addEventListener("click", () => {
   activeFilter = button.dataset.filter;
   renderRecords();
 }));
 $$(`[data-period]`).forEach((button) => button.addEventListener("click", () => {
-  activePeriod = button.dataset.period;
+  activeAnalysisPeriod = button.dataset.period;
+  if (activeAnalysisPeriod === "custom") {
+    const today = localDateInput();
+    if (!$("#analysis-end").value) $("#analysis-end").value = today;
+    if (!$("#analysis-start").value) $("#analysis-start").value = `${today.slice(0, 8)}01`;
+  }
   renderAnalysis();
 }));
+$$(`[data-date-basis]`).forEach((button) => button.addEventListener("click", () => {
+  analysisDateBasis = button.dataset.dateBasis;
+  renderAnalysis();
+}));
+$("#analysis-start").addEventListener("change", renderAnalysis);
+$("#analysis-end").addEventListener("change", renderAnalysis);
+$("#analysis-dimension").addEventListener("change", renderAnalysis);
+$("#wager-search").addEventListener("input", renderRecords);
+$("#clear-wager-drilldown").addEventListener("click", () => {
+  activeWagerDrilldown = null;
+  renderRecords();
+});
+$$(`[data-wager-filter]`).forEach((button) => button.addEventListener("click", () => {
+  activeWagerFilter = button.dataset.wagerFilter;
+  renderRecords();
+}));
+$("#wager-status").addEventListener("change", syncSettlementFields);
+$("#wager-form").addEventListener("submit", saveWager);
+$("#close-wager-dialog").addEventListener("click", () => wagerDialog.close());
+wagerDialog.addEventListener("close", () => {
+  editingWagerId = null;
+  $("#wager-form").reset();
+  setError("#wager-error");
+});
+$("#risk-settings-form").addEventListener("submit", saveRiskSettings);
+$("#stop-cycle-button").addEventListener("click", stopCycle);
+$("#cooloff-day-button").addEventListener("click", () => startCooloff(24));
+$("#cooloff-week-button").addEventListener("click", () => startCooloff(24 * 7));
 $("#close-dialog").addEventListener("click", () => dialog.close());
 dialog.addEventListener("close", () => {
   editingRecordId = null;
@@ -565,8 +1376,24 @@ $("#backup-import-form").addEventListener("submit", async (event) => {
 screens.ledger.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-id]");
   const deleteButton = event.target.closest("[data-delete-id]");
+  const editWagerButton = event.target.closest("[data-edit-wager-id]");
+  const deleteWagerButton = event.target.closest("[data-delete-wager-id]");
+  const drillButton = event.target.closest("[data-wager-dimension]");
   if (editButton) openEditEntry(editButton.dataset.editId);
   if (deleteButton) deleteEntry(deleteButton.dataset.deleteId);
+  if (editWagerButton) openEditWager(editWagerButton.dataset.editWagerId);
+  if (deleteWagerButton) deleteWager(deleteWagerButton.dataset.deleteWagerId);
+  if (drillButton) {
+    $("#wager-search").value = "";
+    activeWagerDrilldown = {
+      dimension: drillButton.dataset.wagerDimension,
+      value: drillButton.dataset.wagerValue,
+      dateBasis: analysisDateBasis,
+      range: analysisRange(),
+    };
+    activeWagerFilter = "all";
+    setPage("records");
+  }
 });
 $("#lock-button").addEventListener("click", () => {
   if (!saveBusy) lockApp();
@@ -638,4 +1465,3 @@ if (location.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(locat
 }
 
 refreshVaultState();
-

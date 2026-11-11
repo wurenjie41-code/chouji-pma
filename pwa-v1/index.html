@@ -59,16 +59,36 @@
               <div class="hero-topline">
                 <div>
                   <p class="eyebrow light">本机账本 <span id="storage-status">检查存储中…</span></p>
-                  <p class="hero-caption">投注净结果</p>
+                  <p id="hero-caption" class="hero-caption">本周期已结算投注净结果</p>
                 </div>
                 <span class="currency-chip">CNY</span>
               </div>
-              <strong id="net-total" class="hero-total">¥0.00</strong>
+              <strong id="settled-net" class="hero-total">¥0.00</strong>
               <div class="hero-stats">
-                <div><span>累计投注</span><strong id="stake-total">¥0.00</strong></div>
-                <div><span>累计返还</span><strong id="return-total">¥0.00</strong></div>
-                <div><span>记录笔数</span><strong id="entry-count">0</strong></div>
+                <div><span>已结算投注额</span><strong id="settled-stake">¥0.00</strong></div>
+                <div><span>未结算敞口 · <small id="open-count">0 笔</small></span><strong id="open-stake">¥0.00</strong></div>
+                <div><span>投注收益率 ROI</span><strong id="settled-roi">—</strong></div>
               </div>
+              <p class="hero-footnote">ROI = 本周期已结算投注净结果 ÷ 本周期已结算投注额；作废投注不计入。</p>
+            </section>
+
+            <section id="legacy-result-card" class="legacy-result-card">
+              <div><strong>旧版未关联投注流水</strong><p>保留自升级前的记录，结算状态未知，不计入上方 ROI。</p></div>
+              <strong id="legacy-cycle-net">¥0.00</strong>
+            </section>
+
+            <section class="content-card budget-card">
+              <div class="card-heading"><div><p class="eyebrow">BUDGET GUARD</p><h2 id="budget-period-title">本周期预算</h2></div><strong id="budget-remaining" class="mini-total">未设置</strong></div>
+              <div class="budget-values"><span>已使用 <strong id="budget-used">¥0.00</strong></span><span>剩余 <strong id="budget-left">—</strong></span></div>
+              <progress id="budget-progress" class="budget-progress" max="100" value="0" aria-label="预算使用比例"></progress>
+              <p id="budget-caption" class="small-note">在“保护”中设置预算。投注预算按投注日期计，不因赢款增加。</p>
+            </section>
+
+            <section class="content-card fund-card">
+              <div class="card-heading"><div><p class="eyebrow">FUND MOVEMENT</p><h2>资金变化</h2></div><strong id="fund-change" class="mini-total">¥0.00</strong></div>
+              <div class="mini-metrics"><span>存款 <strong id="deposit-total">¥0.00</strong></span><span>提款 <strong id="withdrawal-total">¥0.00</strong></span><span>净存款 <strong id="net-deposits">¥0.00</strong></span></div>
+              <div class="mini-metrics"><span>投注现金变化 <strong id="wager-cash-change">¥0.00</strong></span></div>
+              <p class="small-note">按已记录的存取款和投注支出/返还推算，不代表投注平台实时余额。</p>
             </section>
 
             <section class="content-card overview-period">
@@ -79,27 +99,50 @@
 
             <div class="section-heading">
               <div><p class="eyebrow">RECENT</p><h2>最近记录</h2></div>
-              <button class="primary-button compact" type="button" data-open-form><span aria-hidden="true">＋</span> 记一笔</button>
+              <button class="primary-button compact" type="button" data-open-wager><span aria-hidden="true">＋</span> 记录投注</button>
             </div>
             <div id="overview-empty-state" class="empty-state hidden">
               <span class="empty-icon" aria-hidden="true">↗</span>
               <h3>从第一笔开始</h3>
-              <p>录入流水后，这里会显示净结果、近一周表现和最近记录。</p>
-              <button class="text-button" type="button" data-open-form>新增记录</button>
+              <p>录入投注或资金流水后，这里会显示结算结果、预算和未结算敞口。</p>
+              <button class="text-button" type="button" data-open-wager>记录第一注</button>
             </div>
             <ul id="overview-recent-list" class="entry-list" aria-live="polite"></ul>
 
             <section class="privacy-card">
               <div class="privacy-icon" aria-hidden="true">⌂</div>
-              <div><strong>数据只保存在此设备</strong><p>主账本和加密快照位于当前浏览器。清除网站数据、浏览器卸载或设备丢失可能导致账本永久消失。</p></div>
+              <div><strong>遵守预算比追赶结果重要</strong><p>本工具只能约束应用内记录，不能阻止你使用外部投注平台。达到上限时可停止本周期、开启冷静期，并查看平台限额或自我排除设置。</p></div>
             </section>
           </div>
 
           <div id="page-records" class="app-page hidden">
             <div class="section-heading page-heading">
-              <div><p class="eyebrow">LEDGER</p><h2>流水明细</h2></div>
-              <button class="primary-button compact" type="button" data-open-form><span aria-hidden="true">＋</span> 记一笔</button>
+              <div><p class="eyebrow">WAGER LOG</p><h2>投注与资金流水</h2></div>
+              <button class="primary-button compact" type="button" data-open-wager><span aria-hidden="true">＋</span> 记录投注</button>
             </div>
+            <div class="record-tools">
+              <input id="wager-search" type="search" placeholder="搜索比赛、运动、玩法、平台或备注" aria-label="搜索投注记录" />
+              <div class="filter-row" role="group" aria-label="按投注状态筛选">
+                <button class="filter-chip selected" type="button" data-wager-filter="all" aria-pressed="true">全部投注</button>
+                <button class="filter-chip" type="button" data-wager-filter="open" aria-pressed="false">未结算</button>
+                <button class="filter-chip" type="button" data-wager-filter="settled" aria-pressed="false">已结算</button>
+              </div>
+            </div>
+            <p id="wager-count" class="results-caption">0 笔投注</p>
+            <button id="clear-wager-drilldown" class="text-button hidden" type="button">清除分析筛选</button>
+            <div id="wager-empty-state" class="empty-state hidden">
+              <span class="empty-icon" aria-hidden="true">☷</span>
+              <h3>还没有逐注记录</h3>
+              <p>每注单独记录，结算后补录实际返还，未结算投注会单独显示资金敞口。</p>
+              <button class="text-button" type="button" data-open-wager>新增投注记录</button>
+            </div>
+            <ul id="wager-list" class="entry-list" aria-live="polite"></ul>
+            <section class="content-card legacy-note">
+              <strong>旧版未关联流水</strong>
+              <p>升级前的投注支出与派彩已原样保留，但无法判断结算状态或对应哪一注。它们会单独显示，不计入新口径的已结算 ROI。</p>
+              <button class="text-button" type="button" data-open-form>添加资金流水</button>
+            </section>
+            <div class="section-heading subsection-heading"><div><p class="eyebrow">CASH LEDGER</p><h2>存取款及旧版流水</h2></div><button class="secondary-button" type="button" data-open-form>添加流水</button></div>
             <div class="filter-row" role="group" aria-label="按流水类型筛选">
               <button class="filter-chip selected" type="button" data-filter="all" aria-pressed="true">全部</button>
               <button class="filter-chip" type="button" data-filter="stake" aria-pressed="false">投注</button>
@@ -131,16 +174,29 @@
               <span class="currency-chip dark-chip">CNY</span>
             </div>
             <div class="period-switch" role="group" aria-label="分析周期">
-              <button class="period-chip selected" type="button" data-period="7" aria-pressed="true">近 7 天</button>
-              <button class="period-chip" type="button" data-period="30" aria-pressed="false">近 30 天</button>
+              <button class="period-chip selected" type="button" data-period="month" aria-pressed="true">本月</button>
+              <button class="period-chip" type="button" data-period="week" aria-pressed="false">本周</button>
+              <button class="period-chip" type="button" data-period="custom" aria-pressed="false">自定义</button>
               <button class="period-chip" type="button" data-period="all" aria-pressed="false">全部</button>
             </div>
+            <div id="analysis-custom-range" class="custom-range hidden">
+              <label>从<input id="analysis-start" type="date" /></label>
+              <label>到<input id="analysis-end" type="date" /></label>
+            </div>
+            <div class="filter-row date-basis" role="group" aria-label="分析日期口径">
+              <button class="filter-chip selected" type="button" data-date-basis="placed" aria-pressed="true">按投注日期</button>
+              <button class="filter-chip" type="button" data-date-basis="settled" aria-pressed="false">按结算日期</button>
+            </div>
             <p id="analysis-period-label" class="results-caption"></p>
+            <p id="analysis-sample-note" class="sample-note"></p>
+            <label class="analysis-dimension-label" for="analysis-dimension">按类别查看 <select id="analysis-dimension"><option value="sport">运动 / 类别</option><option value="league">联赛</option><option value="market">玩法</option><option value="odds">赔率区间</option><option value="platform">平台</option><option value="hour">时段</option><option value="weekday">星期</option></select></label>
             <section class="analysis-grid">
-              <article class="metric-card"><span>投注净结果</span><strong id="analysis-net">¥0.00</strong></article>
-              <article class="metric-card"><span>投注金额</span><strong id="analysis-stake">¥0.00</strong></article>
-              <article class="metric-card"><span>派彩与退款</span><strong id="analysis-return">¥0.00</strong></article>
-              <article class="metric-card"><span>净结果 / 投注</span><strong id="analysis-rate">—</strong></article>
+              <article class="metric-card"><span>已结算净结果</span><strong id="analysis-net">¥0.00</strong></article>
+              <article class="metric-card"><span>已结算投注额</span><strong id="analysis-stake">¥0.00</strong></article>
+              <article class="metric-card"><span>实际返还（含本金）</span><strong id="analysis-return">¥0.00</strong></article>
+              <article class="metric-card"><span>投注收益率 ROI</span><strong id="analysis-rate">—</strong></article>
+              <article class="metric-card"><span>未结算敞口</span><strong id="analysis-open">¥0.00</strong></article>
+              <article class="metric-card"><span>投注笔数</span><strong id="analysis-count">0</strong></article>
             </section>
             <section class="content-card analysis-card">
               <div class="card-heading"><div><p class="eyebrow">DAILY RESULT</p><h2 id="trend-title">每日净结果</h2></div></div>
@@ -152,13 +208,65 @@
               <div id="type-breakdown" class="breakdown-list"></div>
               <p id="breakdown-empty" class="empty-hint hidden">添加流水后可查看投注、派彩、退款和账户存取构成。</p>
             </section>
-            <p class="analysis-note">净结果按“派彩 + 退款 − 投注”计算；账户存入和取出不计入投注净结果。</p>
+            <p id="legacy-analysis-note" class="analysis-note"></p>
+            <p class="analysis-note">ROI = 已结算投注净结果 ÷ 已结算投注额。作废投注不进入分母；样本较少时不据此判断优势或预测未来。</p>
+          </div>
+
+          <div id="page-risk" class="app-page hidden">
+            <div class="section-heading page-heading"><div><p class="eyebrow">PROTECT</p><h2>预算与风险保护</h2></div><span class="currency-chip dark-chip">本机设置</span></div>
+            <section class="content-card protection-status">
+              <p id="risk-status" class="risk-status">保护状态读取中…</p>
+              <div class="risk-summary-grid">
+                <div><span>预算使用</span><strong id="risk-budget-usage">未设置</strong></div>
+                <div><span>预算剩余</span><strong id="risk-budget-remaining">未设置</strong></div>
+                <div><span>风险占用</span><strong id="risk-exposure">¥0.00</strong></div>
+                <div><span>距亏损上限</span><strong id="risk-loss-remaining">未设置</strong></div>
+                <div><span>本周期已结算亏损</span><strong id="risk-loss">¥0.00</strong></div>
+              </div>
+            </section>
+            <section class="content-card risk-alert-card">
+              <div class="card-heading"><div><p class="eyebrow">CHECK-IN</p><h2>提醒与行动</h2></div></div>
+              <div id="risk-alerts" class="risk-alert-list"></div>
+              <div class="risk-actions">
+                <button id="stop-cycle-button" class="secondary-button" type="button">停止本周期新增记录</button>
+                <button id="cooloff-day-button" class="secondary-button" type="button">冷静 24 小时</button>
+                <button id="cooloff-week-button" class="secondary-button" type="button">冷静 7 天</button>
+              </div>
+            </section>
+            <form id="risk-settings-form" class="content-card risk-settings-form">
+              <div class="card-heading"><div><p class="eyebrow">YOUR LIMITS</p><h2>预设预算与上限</h2></div></div>
+              <label class="field-label" for="risk-period">预算周期</label>
+              <select id="risk-period"><option value="monthly">法定月（每月 1 日重置）</option><option value="weekly">自然周（周一重置）</option></select>
+              <label class="field-label" for="risk-budget-input">周期投注预算（CNY，可留空）</label>
+              <input id="risk-budget-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="不设置" />
+              <label class="field-label" for="risk-loss-input">周期亏损上限（CNY，可留空）</label>
+              <input id="risk-loss-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="不设置" />
+              <label class="field-label" for="risk-max-input">单笔投注上限（CNY，可留空）</label>
+              <input id="risk-max-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="不设置" />
+              <div class="time-window-fields">
+                <label class="field-label" for="risk-time-start">允许记账时段（可选）<input id="risk-time-start" type="time" /></label>
+                <label class="field-label" for="risk-time-end">结束时间<input id="risk-time-end" type="time" /></label>
+              </div>
+              <p class="small-note">本周期内可降低金额或收紧时段；放宽上限需等到下个周期。额度达到上限后，本工具会拒绝新增投注记录，但无法阻止你使用外部平台。</p>
+              <p id="risk-settings-error" class="inline-error" role="alert"></p>
+              <button class="primary-button" type="submit">保存保护设置</button>
+            </form>
+            <section class="content-card risk-help-card">
+              <div class="card-heading"><div><p class="eyebrow">PAUSE IS A PLAN</p><h2>需要停下来时</h2></div></div>
+              <p>如果你发现自己借钱投注、隐瞒损失、反复超预算或执着于追回亏损，先停止本周期记录，开启冷静期，并在投注平台中查找限额、暂停或自我排除设置。也可以联系现实中信任的人或所在地的专业支持服务。</p>
+              <p class="small-note">提醒依据本机记录中的行为信号，不是诊断。本工具不能阻止你在外部投注平台下注，也不会提供下一注或追回亏损建议。</p>
+            </section>
+            <details class="content-card history-card">
+              <summary>查看本机修改记录（最近 500 项）</summary>
+              <ul id="audit-list" class="audit-list"></ul>
+            </details>
           </div>
 
           <nav id="tab-bar" class="tab-bar" aria-label="主导航">
             <button class="tab-button selected" type="button" data-page="overview" aria-current="page"><span aria-hidden="true">⌂</span><small>概览</small></button>
             <button class="tab-button" type="button" data-page="records" aria-current="false"><span aria-hidden="true">☷</span><small>明细</small></button>
             <button class="tab-button" type="button" data-page="analysis" aria-current="false"><span aria-hidden="true">◔</span><small>分析</small></button>
+            <button class="tab-button" type="button" data-page="risk" aria-current="false"><span aria-hidden="true">◇</span><small>保护</small></button>
           </nav>
         </section>
       </main>
@@ -172,11 +280,12 @@
         <div class="dialog-heading"><div><p class="eyebrow">LEDGER ENTRY</p><h2 id="entry-title">新增记录</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="关闭">×</button></div>
         <label class="field-label" for="entry-kind">类型</label>
         <select id="entry-kind" required>
-          <option value="stake">投注支出</option>
-          <option value="payout">派彩返还</option>
           <option value="deposit">账户存入</option>
           <option value="withdrawal">账户取出</option>
-          <option value="refund">退款 / 退回</option>
+          <option value="bonus">奖金 / 赠金</option>
+          <option value="refund">独立退款</option>
+          <option value="stake">旧版未关联投注支出</option>
+          <option value="payout">旧版未关联返还</option>
         </select>
         <label class="field-label" for="entry-amount">金额（CNY）</label>
         <div class="amount-input"><span>¥</span><input id="entry-amount" type="number" inputmode="decimal" min="0.01" max="999999999.99" step="0.01" placeholder="0.00" required /></div>
@@ -184,8 +293,55 @@
         <input id="entry-date" type="date" required />
         <label class="field-label" for="entry-note">备注 <span class="muted">选填</span></label>
         <input id="entry-note" type="text" maxlength="120" placeholder="例如：赛事或平台" />
+        <p class="small-note">逐注投注的结算返还请在对应投注记录中填写；不要重复添加同一笔返还流水。</p>
         <p id="entry-error" class="inline-error" role="alert"></p>
         <button id="entry-save-button" class="primary-button save-button" type="submit">加密保存</button>
+      </form>
+    </dialog>
+
+    <dialog id="wager-dialog" class="sheet-dialog">
+      <form id="wager-form" class="sheet-content">
+        <div class="dialog-grabber" aria-hidden="true"></div>
+        <div class="dialog-heading"><div><p class="eyebrow">ONE WAGER · MANUAL</p><h2 id="wager-title">记录投注</h2></div><button id="close-wager-dialog" class="icon-button" type="button" aria-label="关闭">×</button></div>
+        <label class="field-label" for="wager-event">比赛或事件</label>
+        <input id="wager-event" type="text" maxlength="160" placeholder="例如：主队 vs 客队" required />
+        <div class="field-grid">
+          <label class="field-label" for="wager-sport">运动 / 类别<input id="wager-sport" list="sports-options" maxlength="60" placeholder="例如：足球" /></label>
+          <label class="field-label" for="wager-league">联赛<input id="wager-league" list="league-options" maxlength="80" placeholder="可选" /></label>
+        </div>
+        <label class="field-label" for="wager-market">玩法 / 选择</label>
+        <input id="wager-market" type="text" maxlength="120" placeholder="例如：全场大小、主队胜" />
+        <div class="field-grid">
+          <label class="field-label" for="wager-platform">平台<input id="wager-platform" list="platform-options" maxlength="80" placeholder="可选" /></label>
+          <label class="field-label" for="wager-odds">十进制赔率<input id="wager-odds" type="number" min="1" max="1000" step="0.001" inputmode="decimal" placeholder="可选" /></label>
+        </div>
+        <div class="field-grid">
+          <label class="field-label" for="wager-stake">投注金额（CNY）<input id="wager-stake" type="number" min="0.01" max="999999999.99" step="0.01" inputmode="decimal" required /></label>
+          <label class="field-label" for="wager-combo">类型<select id="wager-combo"><option value="single">单关</option><option value="parlay">串关</option></select></label>
+        </div>
+        <label class="field-label" for="wager-placed-at">投注时间</label>
+        <input id="wager-placed-at" type="datetime-local" required />
+        <label class="field-label" for="wager-status">结算状态</label>
+        <select id="wager-status"><option value="open">未结算</option><option value="won">已结算 · 赢</option><option value="lost">已结算 · 输</option><option value="void">已作废 / 退回</option><option value="cashout">提前结算 / 其他结算</option></select>
+        <div id="settlement-fields" class="hidden">
+          <label class="field-label" for="wager-return">实际返还（CNY，含返还本金）</label>
+          <input id="wager-return" type="number" min="0" max="999999999.99" step="0.01" inputmode="decimal" placeholder="输：0；赢：填实际到账总额" />
+          <label class="field-label" for="wager-fee">手续费（CNY）</label>
+          <input id="wager-fee" type="number" min="0" max="999999999.99" step="0.01" inputmode="decimal" value="0" />
+          <label class="field-label" for="wager-settled-at">结算时间</label>
+          <input id="wager-settled-at" type="datetime-local" />
+          <label class="field-label" for="wager-result">赛果 / 结算说明<input id="wager-result" type="text" maxlength="120" /></label>
+        </div>
+        <label class="field-label" for="wager-tags">标签 <span class="muted">用逗号分隔</span></label>
+        <input id="wager-tags" type="text" maxlength="160" placeholder="例如：联赛、滚球" />
+        <label class="field-label" for="wager-note">备注 <span class="muted">选填</span></label>
+        <input id="wager-note" type="text" maxlength="240" />
+        <label class="field-label" for="wager-state">下注前状态 <span class="muted">选填</span></label>
+        <input id="wager-state" type="text" maxlength="120" placeholder="例如：平静、疲惫、刚经历亏损" />
+        <p class="small-note">来源：手动录入。实际返还包含返还本金；投注净结果 = 实际返还 − 投注额 − 手续费。未结算投注会占用风险敞口。</p>
+        <p id="wager-error" class="inline-error" role="alert"></p>
+        <button id="wager-save-button" class="primary-button save-button" type="submit">加密保存投注</button>
+        <datalist id="sports-options"></datalist><datalist id="league-options"></datalist><datalist id="platform-options"></datalist>
       </form>
     </dialog>
 
@@ -204,4 +360,3 @@
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>
-

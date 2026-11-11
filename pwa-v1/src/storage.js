@@ -5,6 +5,22 @@ const STATE_KEY = "main";
 const VAULT_KEY = "vault";
 const SNAPSHOT_LIMIT = 5;
 const PBKDF2_ITERATIONS = 600_000;
+const AUDIT_LIMIT = 500;
+
+function defaultRiskSettings() {
+  return { period: "monthly", budgetMinor: null, lossLimitMinor: null, maxStakeMinor: null, allowedStart: "", allowedEnd: "", cooloffUntil: null, stoppedPeriodKey: null };
+}
+
+function normalizeState(state) {
+  return {
+    ...state,
+    schemaVersion: 2,
+    records: Array.isArray(state.records) ? state.records : [],
+    wagers: Array.isArray(state.wagers) ? state.wagers : [],
+    auditLog: Array.isArray(state.auditLog) ? state.auditLog.slice(-AUDIT_LIMIT) : [],
+    riskSettings: { ...defaultRiskSettings(), ...(state.riskSettings ?? {}) },
+  };
+}
 
 let databasePromise;
 
@@ -121,7 +137,7 @@ export async function createVault(password) {
   const db = await openDatabase();
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const key = await deriveKey(password, salt);
-  const state = { sequence: 1, createdAt: new Date().toISOString(), records: [] };
+  const state = normalizeState({ sequence: 1, createdAt: new Date().toISOString(), records: [] });
   const envelope = await encryptState(state, key);
   const tx = createTransaction(db, ["meta", "state", "snapshots"], "readwrite");
   tx.objectStore("meta").put({ id: VAULT_KEY, version: 1, salt: bytesToBase64(salt), kdf: "PBKDF2-SHA256", iterations: PBKDF2_ITERATIONS, createdAt: state.createdAt });
@@ -140,7 +156,7 @@ export async function unlockVault(password) {
   if (!meta || !savedState) throw new Error("账本信息不完整，当前数据可能已被清理。请勿重复创建新账本。 ");
   const key = await deriveKey(password, base64ToBytes(meta.salt));
   try {
-    const state = await decryptState(savedState.envelope, key);
+    const state = normalizeState(await decryptState(savedState.envelope, key));
     return { key, state };
   } catch {
     throw new Error("密码错误，或本机加密数据已损坏。数据没有被修改。");
@@ -149,6 +165,7 @@ export async function unlockVault(password) {
 
 export async function commitState(nextState, key) {
   const db = await openDatabase();
+  nextState = normalizeState(nextState);
   const envelope = await encryptState(nextState, key);
   const tx = createTransaction(db, ["state", "snapshots"], "readwrite");
   const snapshots = tx.objectStore("snapshots");
@@ -170,7 +187,7 @@ export async function restorePrevious(key, currentSequence) {
   const previous = rows.filter((row) => row.sequence < currentSequence).sort((a, b) => b.sequence - a.sequence)[0];
   if (!previous) throw new Error("还没有可恢复的上一份加密快照。 ");
   try {
-    return await decryptState(previous.envelope, key);
+    return normalizeState(await decryptState(previous.envelope, key));
   } catch {
     throw new Error("上一份快照无法解密，原账本保持不变。 ");
   }
@@ -228,20 +245,67 @@ function isValidDate(value) {
 }
 
 function validateState(state, expectedSequence) {
-  if (!state || !Number.isSafeInteger(state.sequence) || state.sequence < 1 || state.sequence !== expectedSequence || !Array.isArray(state.records) || state.records.length > 100_000) {
+  if (!state || state.schemaVersion !== 2 || !Number.isSafeInteger(state.sequence) || state.sequence < 1 || state.sequence !== expectedSequence || !Array.isArray(state.records) || state.records.length > 100_000) {
     throw new Error("备份账本结构无效。");
   }
   const ids = new Set();
   for (const record of state.records) {
-    const sign = { stake: -1, payout: 1, deposit: 1, withdrawal: -1, refund: 1 }[record?.kind];
+    const sign = { stake: -1, payout: 1, deposit: 1, withdrawal: -1, refund: 1, bonus: 1 }[record?.kind];
     if (!record || typeof record.id !== "string" || !record.id || record.id.length > 128 || ids.has(record.id)
       || !sign || !Number.isSafeInteger(record.amountMinor) || record.amountMinor <= 0
       || record.deltaMinor !== record.amountMinor * sign || !isValidDate(record.date)
       || typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt))
-      || typeof record.note !== "string" || record.note.length > 120) {
+      || typeof record.note !== "string" || record.note.length > 120
+      || (record.legacyType != null && typeof record.legacyType !== "boolean")) {
       throw new Error("备份中存在无效流水，导入已取消。");
     }
     ids.add(record.id);
+  }
+  if (state.wagers != null && !Array.isArray(state.wagers)) throw new Error("备份投注数据结构无效。");
+  if ((state.wagers?.length ?? 0) > 100_000) throw new Error("备份投注数量超出支持范围。");
+  for (const wager of state.wagers ?? []) {
+    const validStatus = ["open", "won", "lost", "void", "cashout"].includes(wager?.status);
+    const settled = wager?.status !== "open";
+    if (!wager || typeof wager.id !== "string" || !wager.id || ids.has(wager.id)
+      || !Number.isSafeInteger(wager.stakeMinor) || wager.stakeMinor <= 0
+      || !Number.isSafeInteger(wager.feeMinor) || wager.feeMinor < 0
+      || !Number.isFinite(Date.parse(wager.placedAt)) || !validStatus
+      || typeof wager.event !== "string" || !wager.event || wager.event.length > 160
+      || !["sport", "league", "market", "platform", "result", "note", "beforeState", "source"].every((key) => typeof wager[key] === "string")
+      || wager.sport.length > 60 || wager.league.length > 80 || wager.market.length > 120 || wager.platform.length > 80
+      || wager.result.length > 160 || wager.note.length > 500 || wager.beforeState.length > 500
+      || !["manual", "image"].includes(wager.source)
+      || !Array.isArray(wager.tags) || wager.tags.length > 8 || wager.tags.some((tag) => typeof tag !== "string" || tag.length > 200)
+      || typeof wager.createdAt !== "string" || !Number.isFinite(Date.parse(wager.createdAt))
+      || (wager.updatedAt != null && (typeof wager.updatedAt !== "string" || !Number.isFinite(Date.parse(wager.updatedAt))))
+      || !["single", "parlay"].includes(wager.combo ?? "single")
+      || (wager.oddsMilli != null && (!Number.isSafeInteger(wager.oddsMilli) || wager.oddsMilli < 1000 || wager.oddsMilli > 1_000_000))
+      || (settled && (!Number.isSafeInteger(wager.actualReturnMinor) || wager.actualReturnMinor < 0 || !Number.isFinite(Date.parse(wager.settledAt)) || Date.parse(wager.settledAt) < Date.parse(wager.placedAt)))
+      || (!settled && (wager.actualReturnMinor != null || wager.settledAt != null))) {
+      throw new Error("备份中存在无效投注，导入已取消。");
+    }
+    ids.add(wager.id);
+  }
+  if (state.riskSettings != null && (typeof state.riskSettings !== "object" || !["monthly", "weekly"].includes(state.riskSettings.period ?? "monthly"))) {
+    throw new Error("备份风险设置结构无效。");
+  }
+  if (state.riskSettings) {
+    for (const key of ["budgetMinor", "lossLimitMinor", "maxStakeMinor"]) {
+      const value = state.riskSettings[key];
+      if (value != null && (!Number.isSafeInteger(value) || value <= 0)) throw new Error("备份风险额度无效。");
+    }
+    for (const key of ["allowedStart", "allowedEnd"]) {
+      const value = state.riskSettings[key] ?? "";
+      if (value && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) throw new Error("备份允许时段无效。");
+    }
+    const { cooloffUntil, stoppedPeriodKey } = state.riskSettings;
+    if (cooloffUntil != null && (typeof cooloffUntil !== "string" || !Number.isFinite(Date.parse(cooloffUntil)))) throw new Error("备份冷静期无效。");
+    if (stoppedPeriodKey != null && (typeof stoppedPeriodKey !== "string" || stoppedPeriodKey.length > 16)) throw new Error("备份周期锁无效。");
+  }
+  if (state.auditLog != null && (!Array.isArray(state.auditLog) || state.auditLog.length > AUDIT_LIMIT
+    || state.auditLog.some((entry) => !entry || typeof entry.id !== "string" || typeof entry.entity !== "string"
+      || typeof entry.entityId !== "string" || typeof entry.action !== "string" || !Number.isFinite(Date.parse(entry.at))))) {
+    throw new Error("备份修改记录结构无效。");
   }
 }
 
@@ -271,7 +335,7 @@ export async function importEncryptedBackup(bundle, password) {
   const key = await deriveKey(password, salt, meta.iterations);
   let state;
   try {
-    state = await decryptState(bundle.state, key);
+    state = normalizeState(await decryptState(bundle.state, key));
     validateState(state, bundle.state.sequence);
   } catch (error) {
     if (error.message === "备份账本结构无效。" || error.message === "备份中存在无效流水，导入已取消。") throw error;
@@ -284,7 +348,7 @@ export async function importEncryptedBackup(bundle, password) {
     if (snapshot.sequence !== snapshot.envelope.sequence || snapshot.sequence > state.sequence) throw new Error("备份快照序号不匹配。");
     let snapshotState;
     try {
-      snapshotState = await decryptState(snapshot.envelope, key);
+      snapshotState = normalizeState(await decryptState(snapshot.envelope, key));
       validateState(snapshotState, snapshot.envelope.sequence);
     } catch {
       throw new Error("备份中有快照无法验证，导入已取消。");
@@ -327,4 +391,3 @@ export async function importEncryptedBackup(bundle, password) {
   });
   return { key, state };
 }
-

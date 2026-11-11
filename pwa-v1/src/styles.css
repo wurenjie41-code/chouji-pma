@@ -49,6 +49,7 @@ input:focus, select:focus { border-color: #73aa96; box-shadow: 0 0 0 3px #dceee6
 .hero-card { overflow: hidden; padding: 23px 22px 18px; border-radius: 25px; background: linear-gradient(140deg, #26745e 0%, #184c41 100%); color: white; box-shadow: 0 14px 38px #1b58451e; }
 .hero-topline { display: flex; align-items: flex-start; justify-content: space-between; }
 .hero-caption { margin: 0; color: #d7e9e1; font-size: 12px; }
+.hero-footnote { margin: 13px 0 0; color: #c7ded4; font-size: 9px; line-height: 1.5; }
 .currency-chip { padding: 6px 9px; border: 1px solid #ffffff30; border-radius: 10px; color: #e1eee8; font-size: 10px; letter-spacing: .1em; }
 .hero-total { display: block; margin: 14px 0 23px; font-size: clamp(37px, 11vw, 52px); font-weight: 750; letter-spacing: -.055em; font-variant-numeric: tabular-nums; }
 .hero-total.negative { color: #ffd6c9; }
@@ -70,6 +71,7 @@ h2 { margin: 0; font-size: 21px; letter-spacing: -.04em; }
 .entry-details { min-width: 0; flex: 1; display: grid; gap: 5px; }
 .entry-details strong { font-size: 13px; }
 .entry-details span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.entry-details .wager-detail { overflow: visible; color: #46544d; line-height: 1.5; text-overflow: clip; white-space: normal; }
 .entry-amount { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .entry-amount.out { color: var(--red); }
 .entry-amount.in { color: var(--green); }
@@ -160,7 +162,66 @@ html { scroll-behavior: smooth; }
 .backup-entry-point { margin-top: 12px; text-align: center; }
 .backup-status { min-height: 16px; margin: -1px 2px 8px; color: var(--green); font-size: 10px; line-height: 1.5; }
 .backup-copy { margin: 0 0 8px; }
-.tab-bar { position: fixed; z-index: 5; right: 0; bottom: 0; left: 0; width: min(100%, 720px); min-height: calc(68px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 auto; padding: 7px 14px calc(7px + env(safe-area-inset-bottom)); border-top: 1px solid #e6ece8; background: #ffffffed; box-shadow: 0 -8px 28px #243a2e0a; backdrop-filter: blur(16px); }
+.tab-bar { position: fixed; z-index: 5; right: 0; bottom: 0; left: 0; width: min(100%, 720px); min-height: calc(68px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, 1fr); margin: 0 auto; padding: 7px 14px calc(7px + env(safe-area-inset-bottom)); border-top: 1px solid #e6ece8; background: #ffffffed; box-shadow: 0 -8px 28px #243a2e0a; backdrop-filter: blur(16px); }
+.budget-card, .fund-card, .protection-status, .risk-alert-card, .risk-settings-form, .risk-help-card, .history-card, .legacy-note { margin: 0 0 13px; padding: 16px; border: 1px solid #e8eeeb; border-radius: 18px; background: #fff; }
+.budget-values { display: flex; justify-content: space-between; gap: 10px; margin: 13px 0 9px; color: var(--muted); font-size: 10px; }
+.budget-values strong { margin-left: 4px; color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
+.budget-progress { width: 100%; height: 9px; appearance: none; border: 0; border-radius: 99px; background: #edf2ef; color: var(--green); }
+.budget-progress::-webkit-progress-bar { border-radius: 99px; background: #edf2ef; }
+.budget-progress::-webkit-progress-value { border-radius: 99px; background: linear-gradient(90deg, #79b99a, #26745e); }
+.budget-progress::-moz-progress-bar { border-radius: 99px; background: #26745e; }
+.small-note { margin: 8px 0 0; color: #7d8983; font-size: 10px; line-height: 1.55; }
+.record-tools { display: grid; gap: 5px; }
+.record-tools input[type=search] { margin: 0 0 6px; }
+.legacy-note { background: #f8faf9; }
+.legacy-result-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid #e6ece8; border-radius: 15px; background: #f7f9f8; }
+.legacy-result-card strong { font-size: 11px; font-variant-numeric: tabular-nums; }
+.legacy-result-card p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.legacy-note strong { font-size: 12px; }
+.legacy-note p { margin: 6px 0 3px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.subsection-heading { margin: 24px 2px 12px; align-items: center; }
+.subsection-heading h2 { font-size: 17px; }
+.entry-mark.pending { background: #fff5de; color: #8c6713; }
+.entry-amount.pending { color: #8c6713; }
+.wager-row { flex-wrap: wrap; }
+.wager-row .row-history { flex: 1 0 100%; margin-left: 50px; }
+.row-history { color: #78847e; font-size: 9px; }
+.row-history summary { cursor: pointer; }
+.row-history ul { margin: 6px 0 0; padding-left: 16px; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.field-grid .field-label, .time-window-fields .field-label { display: grid; gap: 6px; }
+.time-window-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.subsection-heading .secondary-button { min-height: 34px; }
+.analysis-dimension-label { display: grid; gap: 6px; margin: 10px 0; color: var(--muted); font-size: 10px; }
+.analysis-dimension-label select { min-height: 40px; }
+.custom-range { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin: 8px 0; }
+.custom-range label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.custom-range input { min-height: 40px; padding: 0 8px; font-size: 11px; }
+.date-basis { margin-top: 8px; }
+.sample-note { margin: 0 2px 8px; color: #866828; font-size: 10px; line-height: 1.5; }
+.drilldown-button { padding: 0; border: 0; background: transparent; color: var(--green); font: inherit; text-align: left; }
+.breakdown-result { color: #69766f; font-size: 10px; font-variant-numeric: tabular-nums; }
+.breakdown-result.negative { color: var(--red); }
+.risk-status { margin: 0 0 13px; color: var(--green); font-size: 13px; font-weight: 750; }
+.risk-status.blocked { color: var(--red); }
+.risk-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 9px; }
+.risk-summary-grid div { display: grid; gap: 6px; min-width: 0; }
+.risk-summary-grid span { color: var(--muted); font-size: 9px; }
+.risk-summary-grid strong { overflow-wrap: anywhere; font-size: 12px; font-variant-numeric: tabular-nums; }
+.risk-alert-list { display: grid; gap: 8px; margin: 12px 0; }
+.risk-alert { margin: 0; padding: 10px 11px; border-radius: 12px; background: #f1f5f3; color: #536159; font-size: 11px; line-height: 1.5; }
+.risk-alert.warn { background: #fff6df; color: #715818; }
+.risk-alert.stop { background: #fff0ee; color: #9d453e; }
+.risk-alert.ok { background: var(--green-soft); color: var(--green-dark); }
+.risk-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.risk-actions .secondary-button { min-height: 40px; font-size: 10px; }
+.risk-settings-form { display: grid; gap: 7px; }
+.risk-settings-form .card-heading { margin-bottom: 6px; }
+.risk-settings-form .primary-button { margin-top: 5px; }
+.risk-help-card p { color: #58655f; font-size: 11px; line-height: 1.6; }
+.history-card > summary { cursor: pointer; color: var(--green); font-size: 12px; font-weight: 700; }
+.audit-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; margin: 12px 0 0; padding-left: 20px; color: #69766f; font-size: 10px; line-height: 1.5; }
+.audit-list li { padding-left: 2px; }
 .tab-button { min-width: 0; display: grid; justify-items: center; align-content: center; gap: 2px; border: 0; border-radius: 13px; background: transparent; color: #87928c; }
 .tab-button > span { font-size: 21px; line-height: 1.1; }
 .tab-button small { font-size: 10px; font-weight: 650; }
@@ -170,7 +231,7 @@ html { scroll-behavior: smooth; }
 @media (min-width: 620px) {
   .app-shell { padding-bottom: 120px; }
   .tab-bar { bottom: 12px; width: min(calc(100% - 32px), 688px); min-height: 64px; padding: 7px 14px; border: 1px solid #e4ebe7; border-radius: 19px; }
-  .analysis-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .analysis-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -180,4 +241,3 @@ html { scroll-behavior: smooth; }
   .sheet-dialog { margin: auto; border-radius: 24px; }
   .sheet-content { padding-bottom: 25px; }
 }
-
