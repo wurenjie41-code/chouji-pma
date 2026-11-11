@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
     <meta name="theme-color" content="#f4f6f8" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -314,6 +314,15 @@
       <form id="wager-form" class="sheet-content">
         <div class="dialog-grabber" aria-hidden="true"></div>
         <div class="dialog-heading"><div><p class="eyebrow">ONE WAGER · MANUAL</p><h2 id="wager-title">记录投注</h2></div><button id="close-wager-dialog" class="icon-button" type="button" aria-label="关闭">×</button></div>
+        <div class="image-reference">
+          <label class="field-label" for="wager-image-input">截图 / 照片对照 <span class="muted">可选</span></label>
+          <input id="wager-image-input" type="file" accept="image/*" />
+          <p id="wager-image-note" class="small-note">图片只在本机临时预览，不会上传或写入账本。当前版本不自动识别文字，请对照图片手工核对录入。</p>
+          <div id="wager-image-preview-wrap" class="image-preview-wrap hidden">
+            <img id="wager-image-preview" alt="投注截图本机临时预览" />
+            <button id="remove-wager-image" class="secondary-button" type="button">移除图片</button>
+          </div>
+        </div>
         <label class="field-label" for="wager-event">比赛或事件</label>
         <input id="wager-event" type="text" maxlength="160" placeholder="例如：主队 vs 客队" required />
         <div class="field-grid">
@@ -349,7 +358,7 @@
         <input id="wager-note" type="text" maxlength="240" />
         <label class="field-label" for="wager-state">下注前状态 <span class="muted">选填</span></label>
         <input id="wager-state" type="text" maxlength="120" placeholder="例如：平静、疲惫、刚经历亏损" />
-        <p class="small-note">来源：手动录入。实际返还包含返还本金；投注净结果 = 实际返还 − 投注额 − 手续费。未结算投注会占用风险敞口。</p>
+        <p class="small-note">来源会标记为手动录入或图片对照；原图片不会保留。实际返还包含返还本金；投注净结果 = 实际返还 − 投注额 − 手续费。未结算投注会占用风险敞口。</p>
         <p id="wager-error" class="inline-error" role="alert"></p>
         <button id="wager-save-button" class="primary-button save-button" type="submit">加密保存投注</button>
         <datalist id="sports-options"></datalist><datalist id="league-options"></datalist><datalist id="platform-options"></datalist>
@@ -371,3 +380,4 @@
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>
+
