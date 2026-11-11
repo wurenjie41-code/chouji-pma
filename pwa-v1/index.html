@@ -69,7 +69,7 @@
                 <div><span>未结算敞口 · <small id="open-count">0 笔</small></span><strong id="open-stake">¥0.00</strong></div>
                 <div><span>投注收益率 ROI</span><strong id="settled-roi">—</strong></div>
               </div>
-              <p class="hero-footnote">ROI = 本周期已结算投注净结果 ÷ 本周期已结算投注额；作废投注不计入。</p>
+              <p class="hero-footnote">ROI = 本周期已结算投注净结果 ÷ 本周期已结算投注额；作废投注不计入。未结算敞口包含所有尚未结算投注。</p>
             </section>
 
             <section id="legacy-result-card" class="legacy-result-card">
@@ -88,7 +88,7 @@
               <div class="card-heading"><div><p class="eyebrow">FUND MOVEMENT</p><h2>资金变化</h2></div><strong id="fund-change" class="mini-total">¥0.00</strong></div>
               <div class="mini-metrics"><span>存款 <strong id="deposit-total">¥0.00</strong></span><span>提款 <strong id="withdrawal-total">¥0.00</strong></span><span>净存款 <strong id="net-deposits">¥0.00</strong></span></div>
               <div class="mini-metrics"><span>投注现金变化 <strong id="wager-cash-change">¥0.00</strong></span></div>
-              <p class="small-note">按已记录的存取款和投注支出/返还推算，不代表投注平台实时余额。</p>
+              <p class="small-note">存取款按记录日期；投注本金按投注日期，返还和手续费按结算日期计入。仅据本机记录推算，不代表投注平台实时余额。</p>
             </section>
 
             <section class="content-card overview-period">
@@ -209,9 +209,15 @@
               <p id="analysis-no-trend" class="empty-hint hidden">这个周期暂无投注、派彩或退款记录。</p>
             </section>
             <section class="content-card analysis-card">
-              <div class="card-heading"><div><p class="eyebrow">ACTIVITY MIX</p><h2>流水构成</h2></div></div>
+              <div class="card-heading"><div><p class="eyebrow">STAKE RANGE</p><h2>投注金额分布</h2></div></div>
+              <p id="distribution-caption" class="analysis-note"></p>
+              <div id="stake-distribution" class="distribution-list" aria-label="按投注本金划分的笔数和本金总额"></div>
+              <p id="distribution-empty" class="empty-hint hidden">所选范围暂无投注记录。</p>
+            </section>
+            <section class="content-card analysis-card">
+              <div class="card-heading"><div><p class="eyebrow">HISTORICAL BREAKDOWN</p><h2>分类历史描述</h2></div></div>
               <div id="type-breakdown" class="breakdown-list"></div>
-              <p id="breakdown-empty" class="empty-hint hidden">添加流水后可查看投注、派彩、退款和账户存取构成。</p>
+              <p id="breakdown-empty" class="empty-hint hidden">所选范围暂无可分析的逐注记录。</p>
             </section>
             <p id="legacy-analysis-note" class="analysis-note"></p>
             <p class="analysis-note">ROI = 已结算投注净结果 ÷ 已结算投注额。作废投注不进入分母；样本较少时不据此判断优势或预测未来。</p>
@@ -252,7 +258,7 @@
                 <label class="field-label" for="risk-time-start">允许记账时段（可选）<input id="risk-time-start" type="time" /></label>
                 <label class="field-label" for="risk-time-end">结束时间<input id="risk-time-end" type="time" /></label>
               </div>
-              <p class="small-note">本周期内可降低金额或收紧时段；放宽上限需等到下个周期。额度达到上限后，本工具会拒绝新增投注记录，但无法阻止你使用外部平台。</p>
+              <p class="small-note">本周期内可降低金额或收紧时段；放宽上限需等到下个周期。达到上限后会拦截新增投注，也不允许通过编辑增加超限风险；无法阻止你使用外部平台。</p>
               <p id="risk-settings-error" class="inline-error" role="alert"></p>
               <button class="primary-button" type="submit">保存保护设置</button>
             </form>
