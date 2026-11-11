@@ -126,6 +126,33 @@ function wagerMetrics(wagers) {
   return { settledNet, settledStake, returned, openStake, actualNet, fees, count: wagers.length, settledCount: eligible.length, roi: settledStake ? settledNet / settledStake * 100 : null };
 }
 
+function wagerOutcomeMetrics(wagers, dateBasis = analysisDateBasis) {
+  const settled = wagers.filter(isSettledForRoi).slice().sort((a, b) => {
+    const aTime = new Date(dateBasis === "settled" ? a.settledAt : a.placedAt).getTime();
+    const bTime = new Date(dateBasis === "settled" ? b.settledAt : b.placedAt).getTime();
+    return aTime - bTime || a.placedAt.localeCompare(b.placedAt);
+  });
+  let wins = 0, losses = 0, currentSign = 0, currentLength = 0, maxWinStreak = 0, maxLossStreak = 0;
+  for (const wager of settled) {
+    const net = wagerResult(wager);
+    const sign = net > 0 ? 1 : net < 0 ? -1 : 0;
+    if (sign > 0) wins += 1;
+    if (sign < 0) losses += 1;
+    if (sign === 0) {
+      currentSign = 0;
+      currentLength = 0;
+      continue;
+    }
+    currentLength = sign === currentSign ? currentLength + 1 : 1;
+    currentSign = sign;
+    if (sign > 0) maxWinStreak = Math.max(maxWinStreak, currentLength);
+    else maxLossStreak = Math.max(maxLossStreak, currentLength);
+  }
+  const totalStake = settled.reduce((sum, wager) => sum + wager.stakeMinor, 0);
+  const maxStake = settled.reduce((maximum, wager) => Math.max(maximum, wager.stakeMinor), 0);
+  return { wins, losses, maxWinStreak, maxLossStreak, averageStake: settled.length ? Math.round(totalStake / settled.length) : null, maxStake: settled.length ? maxStake : null };
+}
+
 function appendAudit(state, entity, id, action, before, after) {
   const entry = { id: crypto.randomUUID(), entity, entityId: id, action, at: new Date().toISOString(), before: before ? structuredClone(before) : null, after: after ? structuredClone(after) : null };
   return [...(state.auditLog ?? []), entry].slice(-500);
@@ -564,6 +591,11 @@ function renderAnalysis() {
   $("#analysis-rate").classList.toggle("negative", metrics.settledNet < 0);
   $("#analysis-open").textContent = formatMoney(metrics.openStake);
   $("#analysis-count").textContent = String(metrics.count);
+  const outcomes = wagerOutcomeMetrics(wagers, analysisDateBasis);
+  $("#analysis-average-stake").textContent = outcomes.averageStake == null ? "—" : formatMoney(outcomes.averageStake);
+  $("#analysis-max-stake").textContent = outcomes.maxStake == null ? "—" : formatMoney(outcomes.maxStake);
+  $("#analysis-outcomes").textContent = `${outcomes.wins} / ${outcomes.losses}`;
+  $("#analysis-streaks").textContent = `${outcomes.maxWinStreak} / ${outcomes.maxLossStreak}`;
   $("#analysis-period-label").textContent = `${range.label} · ${analysisDateBasis === "placed" ? "按投注日期" : "按结算日期"} · ${metrics.count} 笔投注`;
   const completenessFields = ["sport", "league", "market", "platform", "oddsMilli"];
   const fieldCount = wagers.length * completenessFields.length;
@@ -1237,6 +1269,68 @@ function downloadEncryptedBackup(bundle) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
+function minorCsv(minor) {
+  const value = Math.abs(minor);
+  return `${minor < 0 ? "-" : ""}${Math.floor(value / 100)}.${String(value % 100).padStart(2, "0")}`;
+}
+
+function oddsCsv(oddsMilli) {
+  if (oddsMilli == null) return "";
+  return `${Math.floor(oddsMilli / 1000)}.${String(oddsMilli % 1000).padStart(3, "0")}`.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function csvCell(value, numeric = false) {
+  let text = String(value ?? "");
+  const firstVisible = text.replace(/^[\s\u0000-\u001f\u00a0\ufeff]+/u, "");
+  if (!numeric && (/^[=+\-@]/.test(firstVisible) || /^[\u0000-\u001f]/.test(text))) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportCsv() {
+  if (!session) return;
+  const wagerCount = session.state.wagers.length;
+  const recordCount = session.state.records.length;
+  if (wagerCount + recordCount === 0) {
+    $("#backup-status").textContent = "账本还没有记录可导出。";
+    return;
+  }
+  if (!confirm(`将生成未加密 CSV，包含 ${wagerCount} 笔投注和 ${recordCount} 笔资金/旧版流水，以及事件、平台与备注等个人信息。文件保存到本机后不会再受账本加密保护，请只存入安全位置。继续？`)) return;
+
+  const headers = ["记录类别", "投注/流水时间", "结算时间", "比赛/事件", "运动/类别", "联赛", "玩法", "平台", "赔率", "记录金额(CNY)", "类型", "结算状态", "实际返还(CNY)", "投注净结果(CNY)", "手续费(CNY)", "赛果", "标签", "下注前状态", "资金变动(CNY)", "备注", "来源"];
+  const numericColumns = new Set([8, 9, 12, 13, 14, 18]);
+  const rows = [headers];
+  for (const wager of session.state.wagers) {
+    const cashChange = -wager.stakeMinor + (wager.status === "open" ? 0 : wager.actualReturnMinor - wager.feeMinor);
+    rows.push([
+      "逐注投注", wager.placedAt, wager.settledAt ?? "", wager.event, wager.sport, wager.league, wager.market, wager.platform,
+      oddsCsv(wager.oddsMilli), minorCsv(wager.stakeMinor), wager.combo === "parlay" ? "串关" : "单关", WAGER_STATUS[wager.status] ?? wager.status,
+      wager.status === "open" ? "" : minorCsv(wager.actualReturnMinor), wager.status === "open" ? "" : minorCsv(wagerResult(wager)),
+      wager.status === "open" ? "" : minorCsv(wager.feeMinor), wager.result, (wager.tags ?? []).join("; "), wager.beforeState,
+      minorCsv(cashChange), wager.note, wager.source === "image" ? "图片识别" : "手工录入",
+    ]);
+  }
+  for (const record of session.state.records) {
+    const legacy = isLegacyBetRecord(record);
+    rows.push([
+      legacy ? "旧版未关联流水" : "资金流水", record.date, "", "", "", "", "", "", "", minorCsv(record.amountMinor),
+      TYPE[record.kind]?.label ?? record.kind, legacy ? "结算状态未知" : "资金记录", "", "", "", "", "", "", minorCsv(record.deltaMinor),
+      record.note, legacy ? "旧版记录" : "手工录入",
+    ]);
+  }
+  const content = `\uFEFF${rows.map((row) => row.map((value, index) => csvCell(value, numericColumns.has(index))).join(",")).join("\r\n")}`;
+  const file = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `chouji-records-${localDateInput()}.csv`;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  $("#backup-status").textContent = `已生成明文 CSV（${wagerCount + recordCount} 条）。它未加密，请保存到安全位置。`;
+}
+
 forms.create.addEventListener("submit", async (event) => {
   event.preventDefault();
   const password = $("#new-password").value;
@@ -1412,6 +1506,7 @@ $("#backup-export-button").addEventListener("click", async () => {
     button.disabled = false;
   }
 });
+$("#csv-export-button").addEventListener("click", exportCsv);
 $("#restore-button").addEventListener("click", async () => {
   if (!session || session.state.sequence <= 1 || saveBusy) return;
   if (!confirm("上一份快照会覆盖当前主账本。将以恢复结果作为新版本，并生成新的加密快照。继续？")) return;
