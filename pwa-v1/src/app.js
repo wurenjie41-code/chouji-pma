@@ -74,6 +74,9 @@ function lockApp() {
   session = null;
   if (dialog.open) dialog.close();
   if (wagerDialog.open) wagerDialog.close();
+  for (const selector of ["#overview-recent-list", "#wager-list", "#entry-list", "#type-breakdown", "#risk-alerts", "#audit-list", "#wager-recent-template", "#sports-options", "#league-options", "#platform-options"]) $(selector).replaceChildren();
+  $("#wager-form").reset();
+  forms.entry.reset();
   showVault(false);
 }
 
@@ -516,6 +519,23 @@ function renderRecords() {
 }
 
 function updateRecentOptions(wagers) {
+  const recent = [...wagers].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
+  const seen = new Set();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "从空白开始";
+  const templates = recent.filter((wager) => {
+    const key = JSON.stringify([wager.sport, wager.league, wager.market, wager.platform, wager.combo]);
+    if (seen.has(key) || ![wager.sport, wager.league, wager.market, wager.platform].some(Boolean)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 12).map((wager) => {
+    const option = document.createElement("option");
+    option.value = wager.id;
+    option.textContent = [wager.sport, wager.league, wager.market, wager.platform, wager.combo === "parlay" ? "串关" : "单关"].filter(Boolean).join(" · ");
+    return option;
+  });
+  $("#wager-recent-template").replaceChildren(empty, ...templates);
   for (const [selector, field] of [["#sports-options", "sport"], ["#league-options", "league"], ["#platform-options", "platform"]]) {
     const values = [...new Set(wagers.map((wager) => wager[field]?.trim()).filter(Boolean))].slice(0, 20);
     $(selector).replaceChildren(...values.map((value) => {
@@ -1058,11 +1078,16 @@ async function saveWager(event) {
   if (settled && (!Number.isSafeInteger(feeMinor) || feeMinor < 0)) return setError("#wager-error", "手续费金额无效。");
   const placed = new Date($("#wager-placed-at").value);
   if (Number.isNaN(placed.getTime())) return setError("#wager-error", "请填写有效投注时间。");
-  if (!editingWagerId && placed.getTime() > Date.now() + 5 * 60 * 1000) return setError("#wager-error", "投注时间不能晚于当前时间；请只录入已实际发生的投注。");
+  if (placed.getTime() > Date.now() + 5 * 60 * 1000) return setError("#wager-error", "投注时间不能晚于当前时间；请只录入已实际发生的投注。");
   let settledAt = null;
   if (settled) {
     settledAt = new Date($("#wager-settled-at").value || localDateTimeInput());
     if (Number.isNaN(settledAt.getTime()) || settledAt < placed) return setError("#wager-error", "结算时间无效，且不能早于投注时间。");
+    if (settledAt.getTime() > Date.now() + 5 * 60 * 1000) return setError("#wager-error", "结算时间不能晚于当前时间。");
+    const net = actualReturnMinor - stakeMinor - feeMinor;
+    if ((status === "won" && net <= 0) || (status === "lost" && net >= 0)) {
+      if (!confirm("赛果标签与实际净结果不一致。请核对返还是否包含本金及手续费；如属走盘、半赢半输等特殊结算，可选择“其他结算”。仍按当前内容保存？")) return;
+    }
   }
   const oddsText = $("#wager-odds").value.trim();
   const odds = oddsText ? Number(oddsText) : null;
@@ -1609,6 +1634,12 @@ $$(`[data-wager-filter]`).forEach((button) => button.addEventListener("click", (
   renderRecords();
 }));
 $("#wager-status").addEventListener("change", syncSettlementFields);
+$("#wager-recent-template").addEventListener("change", (event) => {
+  const wager = session?.state.wagers.find((item) => item.id === event.target.value);
+  if (!wager) return;
+  for (const field of ["sport", "league", "market", "platform", "combo"]) $("#wager-" + field).value = wager[field] ?? (field === "combo" ? "single" : "");
+  setError("#wager-error", "已带入分类，请核对后修改；金额、赔率、时间和赛果未从旧记录带入。");
+});
 $("#wager-form").addEventListener("submit", saveWager);
 $("#wager-image-input").addEventListener("change", (event) => {
   const file = event.target.files?.[0];
@@ -1616,6 +1647,11 @@ $("#wager-image-input").addEventListener("change", (event) => {
   selectWagerImage(file);
 });
 $("#remove-wager-image").addEventListener("click", () => clearWagerImagePreview(true));
+$("#wager-image-preview").addEventListener("error", () => {
+  if (!wagerPreviewUrl) return;
+  clearWagerImagePreview(true);
+  setError("#wager-error", "此图片无法预览，请改选 JPG、PNG 或设备支持的图片。记录尚未保存。");
+});
 $("#close-wager-dialog").addEventListener("click", () => wagerDialog.close());
 wagerDialog.addEventListener("close", () => {
   editingWagerId = null;
