@@ -1,4 +1,5 @@
 import { commitState, createVault, exportEncryptedBackup, hasVault, importEncryptedBackup, readStorageHealth, requestPersistentStorage, restorePrevious, unlockVault } from "./storage.js";
+import { setupIntake } from "./intake.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -37,6 +38,13 @@ let activeWagerDrilldown = null;
 let wagerPreviewUrl = null;
 let wagerEntrySource = "manual";
 let wagerOriginalSource = "manual";
+const intake = setupIntake({ getImage: () => wagerPreviewUrl, isUnlocked: () => Boolean(session && wagerDialog.open), apply: fields => {
+  for (const [field,value] of Object.entries(fields)) {
+    const input = document.getElementById('wager-' + field);
+    if (input) input.value = value.slice(0, input.maxLength > 0 ? input.maxLength : 160);
+  }
+  setError('#wager-error', '辅助录入已带入，请检查结算状态、日期及所有字段后保存。');
+} });
 
 function formatMoney(minor) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(minor / 100);
@@ -71,6 +79,7 @@ function showLedger() {
 }
 
 function lockApp() {
+  intake.clear();
   session = null;
   if (dialog.open) dialog.close();
   if (wagerDialog.open) wagerDialog.close();
@@ -424,7 +433,50 @@ function renderWagerTrend(container, wagers) {
   }
 }
 
+function renderMonthlyReview() {
+  const today = localDateInput();
+  const prefix = today.slice(0,7);
+  const days = Number(today.slice(-2));
+  const activity = [];
+  const values = [0];
+  let cumulative = 0;
+  for (let day = 1; day <= days; day++) {
+    const date = prefix + '-' + String(day).padStart(2,'0');
+    cumulative += session.state.wagers.filter(w => w.status !== 'open' && localDateFromTimestamp(w.settledAt) === date).reduce((sum,w) => sum + wagerResult(w),0);
+    values.push(cumulative);
+    const count = session.state.wagers.filter(w => localDateFromTimestamp(w.placedAt) === date).length;
+    const cell = document.createElement('span');
+    cell.className = count ? 'activity-day active' : 'activity-day';
+    cell.textContent = `${day}日 · ${count}笔`;
+    activity.push(cell);
+  }
+  $('#month-net').textContent = formatMoney(cumulative);
+  $('#month-activity').replaceChildren(...activity);
+  const limit = session.state.riskSettings.period === 'monthly' ? session.state.riskSettings.lossLimitMinor : null;
+  const low = Math.min(0,...values,limit == null ? 0 : -limit);
+  const high = Math.max(100,...values);
+  const y = value => 145 - (value-low)/(high-low || 1)*110;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns,'svg');
+  svg.setAttribute('viewBox','0 0 360 180'); svg.setAttribute('role','img');
+  svg.setAttribute('aria-label', `本月截至今日累计净结果 ${formatMoney(cumulative)}，按结算日期。`);
+  const line = (value,color,label) => {
+    const node = document.createElementNS(ns,'line');
+    for (const [key,val] of Object.entries({x1:12,x2:348,y1:y(value),y2:y(value),stroke:color,'stroke-dasharray':'4 3'})) node.setAttribute(key,String(val));
+    const text = document.createElementNS(ns,'text'); text.setAttribute('x','12'); text.setAttribute('y',String(y(value)-5)); text.setAttribute('font-size','9'); text.textContent = label;
+    svg.append(node,text);
+  };
+  line(0,'#87928c','零线');
+  if (limit != null) line(-limit,'#ad5750',`月亏损上限参考 ${formatMoney(-limit)}`);
+  const curve = document.createElementNS(ns,'polyline');
+  curve.setAttribute('points',values.map((value,index) => `${12+index/days*336},${y(value)}`).join(' '));
+  curve.setAttribute('fill','none'); curve.setAttribute('stroke','#26745e'); curve.setAttribute('stroke-width','2');
+  svg.append(curve);
+  $('#month-result-chart').replaceChildren(svg);
+}
+
 function renderOverview() {
+  renderMonthlyReview();
   const { info, wagers, metrics, openWagers, openStake, riskExposure, budgetUsed } = currentCycleData();
   const settings = session.state.riskSettings;
   $("#hero-caption").textContent = `${info.label}已结算投注净结果（按投注日期）`;
@@ -1004,7 +1056,7 @@ function updateWagerImageNote() {
   } else if (editingWagerId && wagerOriginalSource === "image") {
     note.textContent = "这条记录标记为图片对照来源；原图片未保存。如需重新对照，可选择图片临时预览。";
   } else {
-    note.textContent = "图片只在本机临时预览，不会上传或写入账本。当前版本不自动识别文字，请对照图片手工核对录入。";
+    note.textContent = "图片只在本机临时预览，不会上传或写入账本。可展开辅助录入进行本机识别，再逐项核对。";
   }
 }
 
@@ -1019,6 +1071,7 @@ function clearWagerImagePreview(restoreOriginalSource = true) {
 }
 
 function selectWagerImage(file) {
+  if (!session || !wagerDialog.open) return;
   if (!file) return;
   if (!file.type.startsWith("image/")) {
     setError("#wager-error", "请选择图片文件。");
@@ -1634,6 +1687,24 @@ $$(`[data-wager-filter]`).forEach((button) => button.addEventListener("click", (
   renderRecords();
 }));
 $("#wager-status").addEventListener("change", syncSettlementFields);
+async function saveEntryDefaults(clear = false) {
+  if (!session || saveBusy) return;
+  const entryDefaults = {};
+  if (!clear) for (const field of ['sport','league','market','platform','combo']) entryDefaults[field] = document.getElementById('wager-' + field).value.trim();
+  const next = { ...session.state, sequence: session.state.sequence + 1, entryDefaults };
+  saveBusy = true;
+  try { await commitState(next, session.key); session.state = next; setError('#wager-error', clear ? '常用分类已清除。' : '常用分类已加密保存，下次可主动带入并修改。'); }
+  catch (error) { setError('#wager-error', '常用分类保存失败：' + error.message); }
+  finally { saveBusy = false; finishPendingLock(); }
+}
+$('#defaults-save').addEventListener('click', () => saveEntryDefaults());
+$('#defaults-clear').addEventListener('click', () => saveEntryDefaults(true));
+$('#defaults-load').addEventListener('click', () => {
+  const defaults = session?.state.entryDefaults;
+  if (!defaults || !Object.keys(defaults).length) return setError('#wager-error', '尚未保存常用分类。填写分类后可保存。');
+  for (const field of ['sport','league','market','platform','combo']) if (typeof defaults[field] === 'string') document.getElementById('wager-' + field).value = defaults[field];
+  setError('#wager-error', '已带入常用分类，请核对并修改。');
+});
 $("#wager-recent-template").addEventListener("change", (event) => {
   const wager = session?.state.wagers.find((item) => item.id === event.target.value);
   if (!wager) return;
@@ -1654,6 +1725,7 @@ $("#wager-image-preview").addEventListener("error", () => {
 });
 $("#close-wager-dialog").addEventListener("click", () => wagerDialog.close());
 wagerDialog.addEventListener("close", () => {
+  intake.clear();
   editingWagerId = null;
   wagerOriginalSource = "manual";
   clearWagerImagePreview(false);

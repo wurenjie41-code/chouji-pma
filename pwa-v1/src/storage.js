@@ -245,6 +245,9 @@ function isValidDate(value) {
 }
 
 function validateState(state, expectedSequence) {
+  if (state?.entryDefaults != null && (typeof state.entryDefaults !== 'object' || Array.isArray(state.entryDefaults)
+    || Object.entries(state.entryDefaults).some(([key,value]) => !['sport','league','market','platform','combo'].includes(key) || typeof value !== 'string' || value.length > ({sport:60,league:80,market:120,platform:80,combo:6}[key]))
+    || (state.entryDefaults.combo != null && !['single','parlay'].includes(state.entryDefaults.combo)))) throw new Error('备份常用分类无效。');
   if (!state || state.schemaVersion !== 2 || !Number.isSafeInteger(state.sequence) || state.sequence < 1 || state.sequence !== expectedSequence || !Array.isArray(state.records) || state.records.length > 100_000) {
     throw new Error("备份账本结构无效。");
   }
@@ -391,3 +394,4 @@ export async function importEncryptedBackup(bundle, password) {
   });
   return { key, state };
 }
+

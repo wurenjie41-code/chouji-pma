@@ -9,7 +9,8 @@ const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
 assert.equal(new Set(ids).size, ids.length, 'unique HTML IDs');
 for (const [, id] of source.matchAll(/\$\("#([^" ]+)"\)/g)) assert.ok(ids.includes(id), `missing ${id}`);
 const context = vm.createContext({ document: { querySelector: () => ({}), querySelectorAll: () => [] }, Intl, Date, console, assert });
-vm.runInContext(source.slice(source.indexOf('\n') + 1, source.indexOf('forms.create.addEventListener')), context);
+context.setupIntake = () => ({clear(){},cancel(){}});
+vm.runInContext(source.slice(0, source.indexOf('forms.create.addEventListener')).replace(/^import .*;\r?\n/gm,''), context);
 vm.runInContext(`
 const today = localDateTimeInput();
 const base = { id:'test', placedAt:today, settledAt:today, stakeMinor:10000, actualReturnMinor:18000, feeMinor:100, status:'won' };

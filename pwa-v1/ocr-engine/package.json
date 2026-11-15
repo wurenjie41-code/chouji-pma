@@ -1,0 +1,12 @@
+{
+  "name": "chouji-offline-ocr",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.1.2",
+    "@tesseract.js-data/chi_sim": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0"
+  }
+}
+

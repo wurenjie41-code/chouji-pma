@@ -1,0 +1,22 @@
+# Xcode generated files
+DerivedData/
+.build/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Local signing material and secrets
+*.p12
+*.mobileprovision
+*.cer
+Secrets.xcconfig
+*.key
+
+# macOS metadata
+.DS_Store
+node_modules/
+pwa-v1/vendor/
+pwa-v1/ocr-engine/sample.png
+

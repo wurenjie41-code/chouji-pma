@@ -16,6 +16,8 @@ const contentTypes = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".gz": "application/gzip",
 };
 
 createServer(async (request, response) => {
@@ -44,3 +46,4 @@ createServer(async (request, response) => {
   console.log(`筹记 preview: http://${host}:${port}`);
   console.log("仅供此电脑本机预览；iPhone 安装需要 HTTPS 托管地址。");
 });
+
