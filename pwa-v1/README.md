@@ -1,5 +1,7 @@
 # 筹记（WagerMemo）PWA V1
 
+最新交付与未完成项见 `RELEASE_STATUS.md`。2026-11-16 增加显式最近分类复用、未来日期校验、结算标签核对和锁定后列表/表单清理；最终验收尚未完成。
+
 运行于 iPhone Safari/主屏幕的本机资金记录工具。纯 HTML、CSS、JavaScript，无框架、后端或外部数据源；Windows 可开发和发布，不需要本机 Mac/Xcode。旧 Swift 工程及其他资料仍保留在仓库其他目录。
 
 ## 本机预览
