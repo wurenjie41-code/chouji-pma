@@ -36,9 +36,10 @@ let analysisDateBasis = "placed";
 let activeAnalysisPeriod = "month";
 let activeWagerDrilldown = null;
 let wagerPreviewUrl = null;
+let wagerPreviewFile = null;
 let wagerEntrySource = "manual";
 let wagerOriginalSource = "manual";
-const intake = setupIntake({ getImage: () => wagerPreviewUrl, isUnlocked: () => Boolean(session && wagerDialog.open), apply: fields => {
+const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () => Boolean(session && wagerDialog.open), apply: fields => {
   for (const [field,value] of Object.entries(fields)) {
     const input = document.getElementById('wager-' + field);
     if (input) input.value = value.slice(0, input.maxLength > 0 ? input.maxLength : 160);
@@ -1063,6 +1064,7 @@ function updateWagerImageNote() {
 function clearWagerImagePreview(restoreOriginalSource = true) {
   if (wagerPreviewUrl) URL.revokeObjectURL(wagerPreviewUrl);
   wagerPreviewUrl = null;
+  wagerPreviewFile = null;
   $("#wager-image-preview").removeAttribute("src");
   $("#wager-image-preview-wrap").classList.add("hidden");
   $("#wager-image-input").value = "";
@@ -1083,6 +1085,7 @@ function selectWagerImage(file) {
   }
   clearWagerImagePreview(false);
   wagerPreviewUrl = URL.createObjectURL(file);
+  wagerPreviewFile = file;
   wagerEntrySource = "image";
   $("#wager-image-preview").src = wagerPreviewUrl;
   $("#wager-image-preview-wrap").classList.remove("hidden");

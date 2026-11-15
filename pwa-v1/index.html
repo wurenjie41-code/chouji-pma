@@ -333,6 +333,8 @@
         <label class="field-label" for="wager-event">比赛或事件</label>
         <details class="image-reference">
           <summary>截图识别 / 语音与文字辅助录入</summary>
+          <button id="intake-download" class="secondary-button" type="button">下载并检查识别模型</button>
+          <p id="intake-model-status" class="small-note" role="status">模型保存在此浏览器的本机缓存，无需存入“文件”App。首次请保持联网和页面前台。</p>
           <p class="small-note">图片识别在本机运行；首次需联网下载中英文模型，之后可离线使用。系统键盘听写由设备设置管理。识别后请核对金额、赔率、玩法和赛果。</p>
           <div class="risk-actions"><button id="intake-ocr" class="secondary-button" type="button">识别已选图片</button><button id="intake-voice" class="secondary-button" type="button">本机语音识别</button><button id="intake-cancel" class="secondary-button" type="button">停止识别</button></div>
           <label for="intake-text">识别文字 / 系统键盘听写</label>

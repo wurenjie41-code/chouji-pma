@@ -38,9 +38,34 @@ export function parseIntake(text) {
 
 export function setupIntake({ getImage, isUnlocked, apply }) {
   const el = id => document.getElementById(id);
-  let worker, recognition, generation = 0, candidates = {};
+  let worker, recognition, generation = 0, candidates = {}, modelDownload;
+  const base = new URL('../vendor/', import.meta.url).href;
+  const assets = ['tesseract.min.js','worker.min.js','core/tesseract-core-lstm.wasm.js','core/tesseract-core-simd-lstm.wasm.js','lang/chi_sim.traineddata.gz','lang/eng.traineddata.gz'];
+  async function downloadModels() {
+    if (modelDownload) throw new Error('模型下载尚在结束，请稍后重试');
+    const abort = new AbortController();
+    modelDownload = abort;
+    el('intake-download').disabled = true;
+    try {
+      const cache = await caches.open('chouji-ocr-models-v1');
+      for (let index = 0; index < assets.length; index++) {
+        const url = base + assets[index];
+        el('intake-model-status').textContent = `下载 / 检查 ${index+1}/${assets.length}：${assets[index]}，请保持前台…`;
+        const existing = await cache.match(url);
+        if (existing) continue;
+        const response = await fetch(url, {signal:abort.signal});
+        if (!response.ok) throw new Error(`资源下载失败 HTTP ${response.status}：${assets[index]}`);
+        await cache.put(url,response);
+      }
+      el('intake-model-status').textContent = '模型文件已就绪，保存在当前浏览器本机缓存。可选择图片并开始识别；这不是照片识别准确率的保证。';
+    } catch (error) {
+      el('intake-model-status').textContent = '模型未准备好：' + (error.name === 'AbortError' ? '已取消下载' : error.message) + '。可联网后重试；不要清除网站数据。';
+      throw error;
+    } finally { modelDownload = null; el('intake-download').disabled = false; }
+  }
   const status = message => { el('intake-status').textContent = message; };
   function cancel() {
+    modelDownload?.abort();
     generation++;
     if (worker) { void worker.terminate(); worker = null; }
     if (recognition) { recognition.abort(); recognition = null; }
@@ -79,6 +104,7 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     status('已带入选中字段，尚未保存。请核对表单后加密保存。');
   });
   el('intake-cancel').addEventListener('click', () => { cancel(); status('已停止识别。'); });
+  el('intake-download').addEventListener('click', () => { void downloadModels().catch(() => {}); });
   el('intake-ocr').addEventListener('click', async () => {
     const image = getImage();
     if (!image) return status('请先选择截图或照片。');
@@ -86,6 +112,8 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     el('intake-ocr').disabled = true;
     status('正在准备本机中英文识别；首次需要下载引擎和模型。');
     try {
+      await downloadModels();
+      if (ticket !== generation || !isUnlocked()) return;
       if (!window.Tesseract) await new Promise((resolve,reject) => {
         const script = document.createElement('script');
         script.src = new URL('../vendor/tesseract.min.js', import.meta.url).href;
@@ -93,10 +121,12 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
         document.head.append(script);
       });
       if (ticket !== generation || !isUnlocked()) return;
-      const base = new URL('../vendor/', import.meta.url).href;
       const created = await window.Tesseract.createWorker(['chi_sim','eng'], 1, {
         workerPath: base + 'worker.min.js', corePath: base + 'core/', langPath: base + 'lang', workerBlobURL:false,
-        logger: m => { if (ticket === generation) status(`本机识别 ${Math.round((m.progress || 0) * 100)}%`); }
+        logger: m => { if (ticket === generation) {
+          const stage = {'loading tesseract core':'正在加载识别引擎','initializing tesseract':'正在初始化引擎','loading language traineddata':'正在载入中英文模型','initializing api':'正在准备识别','recognizing text':'正在识别图片文字'}[m.status] || '正在准备本机识别';
+          status(`${stage} ${Math.round((m.progress || 0) * 100)}%`);
+        } }
       });
       if (ticket !== generation || !isUnlocked()) { await created.terminate(); return; }
       worker = created;

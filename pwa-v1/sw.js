@@ -1,6 +1,6 @@
 const scopeNamespace = new URL(self.registration.scope).pathname.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "root";
 const CACHE_PREFIX = `chouji-shell-${scopeNamespace}-`;
-const CACHE_NAME = `${CACHE_PREFIX}v1-9`;
+const CACHE_NAME = `${CACHE_PREFIX}v1-10`;
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./src/app.js", "./src/intake.js", "./src/storage.js", "./src/styles.css", "./icons/icon.svg", "./icons/apple-touch-icon.png", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -17,11 +17,13 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(event.request);
+    const vendor = new URL('./vendor/', self.registration.scope);
+    const isVendor = url.pathname.startsWith(vendor.pathname);
+    const modelCache = isVendor ? await caches.open('chouji-ocr-models-v1') : cache;
+    const cached = await modelCache.match(event.request);
     if (cached) return cached;
     const response = await fetch(event.request);
-    const vendor = new URL('./vendor/', self.registration.scope);
-    if (response.ok && url.pathname.startsWith(vendor.pathname)) await cache.put(event.request, response.clone());
+    if (response.ok && isVendor) await modelCache.put(event.request, response.clone());
     return response;
   })());
 });
