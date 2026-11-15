@@ -26,7 +26,7 @@ try {
 if (process.argv.includes('--ocr')) {
   const {createWorker} = await import('../ocr-engine/node_modules/tesseract.js/src/index.js');
   const {fileURLToPath} = await import('node:url');
-  const worker = await createWorker(['chi_sim','eng'],1,{ langPath:fileURLToPath(new URL('../vendor/lang/',import.meta.url)),cacheMethod:'none' });
+  const worker = await createWorker(['chi_sim','eng'],1,{ langPath:fileURLToPath(new URL('../vendor/lang-mobile/',import.meta.url)),cacheMethod:'none' });
   try {
     const result = await worker.recognize(fileURLToPath(new URL('../ocr-engine/sample.png',import.meta.url)));
     assert.match(result.data.text,/50[.,]00/);
