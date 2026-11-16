@@ -86,6 +86,7 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     const draft = parseReceipt(el('intake-text').value, parseIntake(el('intake-text').value));
     candidates = draft.fields;
     const names = { event:'事件',sport:'类别',league:'联赛',market:'玩法',platform:'平台',stake:'投注金额',odds:'十进制赔率',return:'实际返还（含本金）',fee:'手续费',selection:'投注选择',combo:'单注/串关',status:'结算状态','placed-at':'投注时间','settled-at':'结算时间',legs:'串关分项' };
+    names['start-text'] = '开赛时间原文';
     el('intake-fields').replaceChildren(...Object.entries(candidates).map(([key,value]) => {
       const label = document.createElement('label');
       const box = document.createElement('input');
@@ -94,7 +95,8 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
       return label;
     }));
     el('intake-confirm').checked = false;
-    const filled = apply(candidates, true);
+    const applied = apply(candidates, true);
+    const filled = applied && Object.keys(candidates).length > 0;
     status((filled ? '已自动填入待核对表单，尚未保存。' : '候选字段待核对，可确认后带入。') + draft.warnings.join('；'));
   }
   el('intake-parse').addEventListener('click', review);
