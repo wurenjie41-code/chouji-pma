@@ -97,6 +97,7 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     el('intake-confirm').checked = false;
     const applied = apply(candidates, true);
     const filled = applied && Object.keys(candidates).length > 0;
+    if (filled) el('intake-panel').open = false;
     status((filled ? '已自动填入待核对表单，尚未保存。' : '候选字段待核对，可确认后带入。') + draft.warnings.join('；'));
   }
   el('intake-parse').addEventListener('click', review);

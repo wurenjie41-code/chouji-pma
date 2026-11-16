@@ -204,6 +204,17 @@ html { scroll-behavior: smooth; }
 .activity-day.active { background: #e3ece7; color: #345e4e; }
 #month-result-chart svg { width: 100%; height: auto; }
 .image-import-home { background: #e8f2ed; }
+.image-import-home { background: linear-gradient(135deg,#168675,#136e60); color: white; padding: 24px; }
+.image-import-home .eyebrow,.image-import-home .small-note { color: #dbf2e9; }
+.image-import-home .primary-button { width: 100%; background: white; color: #146d5c; margin-bottom: 8px; }
+.image-import-home .secondary-button { width: 100%; background: transparent; border-color: #d9eee6; color: white; }
+.image-import-home .text-button { color: white; }
+#page-settings .footer-actions { display: grid; grid-template-columns: 1fr; gap: 10px; }
+#wager-dialog { width: 100%; height: 100dvh; max-height: 100dvh; max-width: 720px; margin: 0 auto; border-radius: 0; }
+#wager-dialog .dialog-heading { position: sticky; top: 0; background: #fff; z-index: 3; padding: 12px 0; }
+#intake-panel { margin-bottom: 14px; }
+#wager-form > label:has(input[type=checkbox]) { display: flex; gap: 8px; align-items: center; }
+#wager-form input[type=checkbox] { width: 20px; min-height: 20px; flex: 0 0 20px; }
 .image-import-home h2 { margin: 5px 0 10px; }
 #wager-leg-editor { display: grid; gap: 10px; }
 #wager-leg-editor fieldset { min-width: 0; padding: 10px; border: 1px solid #d8e5dd; border-radius: 12px; }

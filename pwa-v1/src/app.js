@@ -18,7 +18,7 @@ const TYPE = {
 };
 const WAGER_STATUS = { open: "未结算", won: "已结算 · 赢", lost: "已结算 · 输", void: "已作废 / 退回", cashout: "提前结算 / 其他结算" };
 const STAKE_BANDS = ["≤ ¥10", "¥10.01–¥50", "¥50.01–¥100", "> ¥100"];
-const PAGES = ["overview", "records", "analysis", "risk"];
+const PAGES = ["overview", "records", "analysis", "settings", "risk"];
 
 let session = null;
 let deferredInstallPrompt = null;
@@ -264,7 +264,7 @@ function setPage(page) {
   activePage = page;
   for (const name of PAGES) $(`#page-${name}`).classList.toggle("hidden", name !== page);
   $$(`[data-page]`).forEach((button) => {
-    const selected = button.dataset.page === page;
+    const selected = button.dataset.page === (page === 'risk' ? 'settings' : page);
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-current", selected ? "page" : "false");
   });
@@ -1100,6 +1100,7 @@ function updateWagerImageNote() {
 }
 
 function clearWagerImagePreview(restoreOriginalSource = true) {
+  intake.clear();
   if (wagerPreviewUrl) URL.revokeObjectURL(wagerPreviewUrl);
   wagerPreviewUrl = null;
   wagerPreviewFile = null;
@@ -1129,6 +1130,9 @@ function selectWagerImage(file) {
   $("#wager-image-preview-wrap").classList.remove("hidden");
   setError("#wager-error");
   updateWagerImageNote();
+  $('#wager-title').textContent = '核对识别结果';
+  $('#intake-panel').open = true;
+  $('#intake-ocr').click();
 }
 
 function wagerBlockReasons(candidate, current) {
@@ -1786,6 +1790,9 @@ $("#wager-image-input").addEventListener("change", (event) => {
   event.target.value = "";
   selectWagerImage(file);
 });
+$('#home-import').addEventListener('click', () => { openNewWager(); $('#wager-image-input').click(); });
+$('#home-camera').addEventListener('click', () => { openNewWager(); $('#wager-camera-input').click(); });
+$('#wager-camera-input').addEventListener('change', event => { const file = event.target.files?.[0]; event.target.value=''; selectWagerImage(file); });
 $("#remove-wager-image").addEventListener("click", () => clearWagerImagePreview(true));
 $("#wager-image-preview").addEventListener("error", () => {
   if (!wagerPreviewUrl) return;
