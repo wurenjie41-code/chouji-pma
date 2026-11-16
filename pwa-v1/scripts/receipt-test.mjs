@@ -33,5 +33,7 @@ assert.equal(db.fields.event,'Example A vs Example B');
 assert.equal(db.fields.return,undefined);
 assert.equal(parseReceipt('类别:篮球').fields.sport,'篮球');
 assert.equal(parseReceipt('类别:足球').fields.sport,'足球');
+assert.equal(parseReceipt('赔 率 : 1.85').fields.odds,'1.85');
+assert.equal(parseReceipt('比赛 : Example A VS Example B').fields.event,'Example A vs Example B');
 console.log('DB first-card isolation and explicit basketball/football checks passed.');
 
