@@ -25,4 +25,13 @@ assert.equal(parseReceipt('最高可赢 0.00').fields.return,undefined);
 assert.deepEqual(parseReceipt('A VS B\nC VS D\n投注金额 500').fields,{});
 assert.equal(parseReceipt(single.replace('11月16日','02月30日')).fields['placed-at'],undefined);
 console.log('Receipt layout checks passed: single, parlay, timestamps, missing fields, precision, truncated/multiple orders.');
+const db = parseReceipt('DB电竞\n总计 投注金额:99999\n单局 - 获胜 Example A 第一局 滚球\n赔率 @1.150 输\n战队 Example A - VS - Example B\n赛事 测试联赛\n开始时间 2026-11-15 22:25:24\n单注 已结算\n下单时间 2026-11-15 22:59:51\n投注金额 321.000\n最高可赢 0.00\n单局 - 获胜 Example C\n赔率 @1.069 赢\n战队 Example C VS Example D');
+assert.equal(db.firstOrderOnly,true);
+assert.equal(db.fields.stake,'321.00');
+assert.equal(db.fields.selection,'Example A');
+assert.equal(db.fields.event,'Example A vs Example B');
+assert.equal(db.fields.return,undefined);
+assert.equal(parseReceipt('类别:篮球').fields.sport,'篮球');
+assert.equal(parseReceipt('类别:足球').fields.sport,'足球');
+console.log('DB first-card isolation and explicit basketball/football checks passed.');
 

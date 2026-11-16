@@ -56,7 +56,7 @@
         <section id="ledger-screen" class="hidden" aria-label="本机账本">
           <div id="page-overview" class="app-page">
             <section class="content-card image-import-home"><p class="eyebrow">图片入账</p><h2>导入截图或照片</h2><p>识别 → 自动填充 → 核对 → 保存</p><button id="home-import" class="primary-button" type="button">选择图片</button><button id="home-camera" class="secondary-button" type="button">拍照录入</button><button class="text-button" type="button" data-open-wager>手动记录</button><p class="small-note">单注与串关分别整理；疑似重复会提示，缺失字段不猜测。</p></section>
-<section class="content-card"><h2>最近入账</h2><p class="small-note">已保存记录；未保存草稿不计入账本。</p><ul id="overview-recent-list" class="entry-list"></ul><button class="text-button" type="button" data-page="records">查看全部账本 →</button></section><p class="small-note">布局版本 S2 · 图片本机处理，核对后入账。</p></div>
+<section class="content-card"><h2>最近入账</h2><p class="small-note">已保存记录；未保存草稿不计入账本。</p><ul id="overview-recent-list" class="entry-list"></ul><button class="text-button" type="button" data-page="records">查看全部账本 →</button></section><p class="small-note">布局版本 S3 · 图片本机处理，核对后入账。</p></div>
           <div id="page-records" class="app-page hidden">
             <div class="section-heading page-heading">
               <div><p class="eyebrow">WAGER LOG</p><h2>投注与资金流水</h2></div>
@@ -308,8 +308,7 @@
         <div id="settlement-fields" class="hidden">
           <label class="field-label" for="wager-return">实际返还（CNY，含返还本金）</label>
           <input id="wager-return" type="number" min="0" max="999999999.99" step="0.01" inputmode="decimal" placeholder="输：0；赢：填实际到账总额" />
-          <label class="field-label" for="wager-fee">手续费（CNY）</label>
-          <input id="wager-fee" type="number" min="0" max="999999999.99" step="0.01" inputmode="decimal" value="0" />
+          <input id="wager-fee" type="hidden" value="0" />
           <label class="field-label" for="wager-settled-at">结算时间</label>
           <input id="wager-settled-at" type="datetime-local" step="1" />
           <label><input id="wager-settled-unknown" type="checkbox" />结算时间未显示，保留为未知（不纳入结算日统计）</label>

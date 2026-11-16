@@ -2,6 +2,13 @@
 export function parseReceipt(text, baseline = {}) {
   const lines = text.normalize('NFKC').replace(/([\u4e00-\u9fff])[ \t]+(?=[\u4e00-\u9fff])/g,'$1').replace(/(\d)[ \t]*([年月日])[ \t]*/g,'$1$2').replace(/日(?=\d{1,2}:)/g,'日 ').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const raw = lines.join('\n');
+  const cardStarts = lines.map((line,index)=> /单局\s*[-–—一]?\s*获胜/.test(line) ? index : -1).filter(index=>index>=0);
+  if (/DB\s*电竞/i.test(raw) && cardStarts.length > 1) {
+    const first = parseReceipt('DB电竞\n' + lines.slice(cardStarts[0],cardStarts[1]).join('\n'));
+    first.warnings.unshift('当前先填入第一张完整订单，后面的截断订单未导入；顶部汇总不入账。');
+    first.firstOrderOnly = true;
+    return first;
+  }
   const fields = {...baseline};
   const warnings = [];
   const unique = (pattern) => {
@@ -45,13 +52,14 @@ export function parseReceipt(text, baseline = {}) {
       || before.find(s => /^[A-Za-z][A-Za-z0-9 ._-]*(?:让分[+−-]?\d+(?:\.\d+)?)?$/.test(s) && !/DB电竞/i.test(s));
     const market = before.filter(s => /获胜者|首先|杀敌|让分|大小|回合/.test(s) && s !== selection).join(' · ');
     const stage = before.find(s => /赛前|滚球|滚盘/.test(s)) || '';
-    const teams = line.split(/\s*-?\s*VS\s*-?\s*/i).map(s=>s.trim());
+    const teams = line.replace(/^战队\s*[:：]?\s*/,'').split(/\s*-?\s*VS\s*-?\s*/i).map(s=>s.trim());
     const selectionSource = selection || before.join(' ');
     const selectedTeams = teams.filter(team => team && selectionSource.toLowerCase().includes(team.toLowerCase()));
     if (selectedTeams.length === 1) selection = selectedTeams[0] + (selectionSource.match(/让分\s*[+−-]?\s*\d+(?:\.\d+)?/)?.[0] || '');
+    else { const fromHeader=teams.filter(team=>team && before.join(' ').toLowerCase().includes(team.toLowerCase())); if(fromHeader.length===1) selection=fromHeader[0]; }
     const startLine = lines.slice(index+1,index+3).join(' ');
     const start = startLine.match(/(?:开赛时间|开始时间)\s*[:：]?\s*(\d{4}[年/-].*)/);
-    return {event:line.replace(/\s*-?\s*VS\s*-?\s*/i,' vs '),selection:selection || '',market,stage,odds:oddsMatch ? oddsMatch[1] : '',startText:start?.[1] || ''};
+    return {event:line.replace(/^战队\s*[:：]?\s*/,'').replace(/\s*-?\s*VS\s*-?\s*/i,' vs '),selection:selection || '',market,stage,odds:oddsMatch ? oddsMatch[1] : '',startText:start?.[1] || ''};
   });
   if (legs.length === 1) {
     fields.event = legs[0].event;
@@ -72,7 +80,9 @@ export function parseReceipt(text, baseline = {}) {
   const league = unique(/赛事\s*[:：]?\s*([^\n]+)/g);
   if (league) fields.league = league;
   if (/最高可赢/.test(raw) && fields.return === undefined) warnings.push('最高可赢不是实际返还，返还金额留空');
-  for (const [key,label] of [['stake','投注金额'],['odds','整单赔率'],['placed-at','投注时间'],['settled-at','结算时间'],['fee','手续费']]) if (fields[key] === undefined) warnings.push(label + '未识别，需核对或补充');
+  for (const [key,label] of [['stake','投注金额'],['odds','整单赔率'],['placed-at','投注时间'],['settled-at','结算时间']]) if (fields[key] === undefined) warnings.push(label + '未识别，需核对或补充');
+  const sport = raw.match(/(?:篮球|足球|\bDOTA\s*2?\b|\bCS\s*2?\b)/i)?.[0];
+  if (sport) fields.sport = /^dota/i.test(sport) ? 'Dota 2' : /^cs/i.test(sport) ? 'CS' : sport;
   warnings.push('币种、游戏类别和赛果请核对；不根据图标猜测。');
   return {fields:Object.fromEntries(Object.entries(fields).filter(([,v])=>v!==undefined && v!=='')),warnings,legs};
 }

@@ -331,7 +331,7 @@ function createWagerRow(wager, withActions = true) {
   const odds = wager.oddsMilli == null ? "赔率未填" : `赔率 ${(wager.oddsMilli / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
   detail.textContent = wager.status === "open"
     ? `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 未结算${wager.note ? ` · ${wager.note}` : ""}`
-    : `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 返还 ${formatMoney(wager.actualReturnMinor)} · 手续费 ${formatMoney(wager.feeMinor)} · ${wager.settledAt ? `结算 ${formatDate(localDateFromTimestamp(wager.settledAt), true)}` : ""}${wager.note ? ` · ${wager.note}` : ""}`;
+    : `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 返还 ${formatMoney(wager.actualReturnMinor)} · ${wager.settledAt ? `结算 ${formatDate(localDateFromTimestamp(wager.settledAt), true)}` : ""}${wager.note ? ` · ${wager.note}` : ""}`;
   details.append(title, subtitle, detail);
   if (wager.selection || wager.settlementTimeUnknown || wager.legs?.length) {
     const extra = document.createElement('details');
@@ -479,7 +479,7 @@ function updateRecentOptions(wagers) {
   });
   $("#wager-recent-template").replaceChildren(empty, ...templates);
   for (const [selector, field] of [["#sports-options", "sport"], ["#league-options", "league"], ["#platform-options", "platform"]]) {
-    const values = [...new Set(wagers.map((wager) => wager[field]?.trim()).filter(Boolean))].slice(0, 20);
+    const values = [...new Set([...(field === 'sport' ? ['Dota 2','CS','篮球','足球','其他'] : []),...wagers.map((wager) => wager[field]?.trim()).filter(Boolean)])].slice(0, 20);
     $(selector).replaceChildren(...values.map((value) => {
       const option = document.createElement("option");
       option.value = value;

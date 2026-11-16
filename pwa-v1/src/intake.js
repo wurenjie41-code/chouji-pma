@@ -87,13 +87,14 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
   function review() {
     const draft = parseReceipt(el('intake-text').value, parseIntake(el('intake-text').value));
     const types = [...new Set(gameIcons.map(icon=>icon.sport))];
-    if (types.length === 1) draft.fields.sport = types[0];
-    else if (types.length>1) draft.fields.sport = '混合项目';
+    if (!draft.firstOrderOnly && types.length === 1 && !draft.fields.sport) draft.fields.sport = types[0];
+    else if (!draft.firstOrderOnly && types.length>1) draft.fields.sport = '混合项目';
     if (draft.legs.length === gameIcons.length && draft.legs.length>1) {
       draft.legs.forEach((leg,index)=> { leg.sport=gameIcons[index].sport; });
       draft.fields.legs=JSON.stringify(draft.legs);
     }
     candidates = draft.fields;
+    delete candidates.fee;
     const names = { event:'事件',sport:'类别',league:'联赛',market:'玩法',platform:'平台',stake:'投注金额',odds:'十进制赔率',return:'实际返还（含本金）',fee:'手续费',selection:'投注选择',combo:'单注/串关',status:'结算状态','placed-at':'投注时间','settled-at':'结算时间',legs:'串关分项' };
     names['start-text'] = '开赛时间原文';
     el('intake-fields').replaceChildren(...Object.entries(candidates).map(([key,value]) => {
