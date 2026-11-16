@@ -270,7 +270,7 @@ function validateState(state, expectedSequence) {
     if (wager?.startText != null && (typeof wager.startText !== 'string' || wager.startText.length > 160)) throw new Error('开赛时间原文无效。');
     if ((wager?.selection != null && (typeof wager.selection !== 'string' || wager.selection.length > 160))
       || (wager?.settlementTimeUnknown != null && typeof wager.settlementTimeUnknown !== 'boolean')
-      || (wager?.legs != null && (!Array.isArray(wager.legs) || wager.legs.length > 30 || wager.legs.some(leg => !leg || typeof leg !== 'object' || typeof leg.event !== 'string' || !leg.event.trim() || Object.entries(leg).some(([key,value]) => !['event','selection','market','stage','odds','startText'].includes(key) || typeof value !== 'string' || value.length > 300))))) throw new Error('投注选择或串关分项无效。');
+      || (wager?.legs != null && (!Array.isArray(wager.legs) || wager.legs.length > 30 || wager.legs.some(leg => !leg || typeof leg !== 'object' || typeof leg.event !== 'string' || !leg.event.trim() || Object.entries(leg).some(([key,value]) => !['event','selection','market','stage','odds','startText','sport'].includes(key) || typeof value !== 'string' || value.length > 300))))) throw new Error('投注选择或串关分项无效。');
     const validStatus = ["open", "won", "lost", "void", "cashout"].includes(wager?.status);
     const settled = wager?.status !== "open";
     if (!wager || typeof wager.id !== "string" || !wager.id || ids.has(wager.id)

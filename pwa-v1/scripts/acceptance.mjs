@@ -11,7 +11,7 @@ for (const page of ['overview','records','analysis','settings','risk']) assert.o
 const importPage = html.slice(html.indexOf('id="page-overview"'),html.indexOf('id="page-records"'));
 assert.ok(importPage.includes('home-import') && importPage.includes('home-camera'),'import and camera entry');
 assert.ok(!importPage.includes('hero-total'),'old financial overview must not appear on import page');
-assert.match(html, /<section hidden aria-hidden="true" id="compatibility-metrics">/);
+assert.ok(!html.includes('compatibility-metrics'),'legacy UI removed');
 for (const [, id] of source.matchAll(/\$\("#([^" ]+)"\)/g)) assert.ok(ids.includes(id), `missing ${id}`);
 const context = vm.createContext({ document: { querySelector: () => ({}), querySelectorAll: () => [] }, Intl, Date, console, assert });
 context.setupIntake = () => ({clear(){},cancel(){}});

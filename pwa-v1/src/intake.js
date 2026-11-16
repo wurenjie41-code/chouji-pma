@@ -1,4 +1,5 @@
 import {parseReceipt} from './receipt.js';
+import {detectGameIcons} from './game-icons.js';
 // Recognition is a draft. Nothing here writes to the ledger or selects a bet.
 export function parseIntake(text) {
   const chineseNumber = token => {
@@ -39,7 +40,7 @@ export function parseIntake(text) {
 
 export function setupIntake({ getImage, isUnlocked, apply }) {
   const el = id => document.getElementById(id);
-  let worker, recognition, generation = 0, candidates = {}, modelDownload;
+  let worker, recognition, generation = 0, candidates = {}, modelDownload, gameIcons = [];
   const base = new URL('../vendor/', import.meta.url).href;
   const assets = ['tesseract.min.js','worker.min.js','core/tesseract-core-lstm.wasm.js','core/tesseract-core-simd-lstm.wasm.js','lang-mobile/chi_sim.traineddata.gz','lang-mobile/eng.traineddata.gz'];
   async function downloadModels() {
@@ -79,11 +80,19 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     el('intake-text').value = '';
     el('intake-fields').replaceChildren();
     candidates = {};
+    gameIcons = [];
     el('intake-confirm').checked = false;
     status('识别结果只作草稿；金额、赔率、玩法、赛果需逐项核对。');
   }
   function review() {
     const draft = parseReceipt(el('intake-text').value, parseIntake(el('intake-text').value));
+    const types = [...new Set(gameIcons.map(icon=>icon.sport))];
+    if (types.length === 1) draft.fields.sport = types[0];
+    else if (types.length>1) draft.fields.sport = '混合项目';
+    if (draft.legs.length === gameIcons.length && draft.legs.length>1) {
+      draft.legs.forEach((leg,index)=> { leg.sport=gameIcons[index].sport; });
+      draft.fields.legs=JSON.stringify(draft.legs);
+    }
     candidates = draft.fields;
     const names = { event:'事件',sport:'类别',league:'联赛',market:'玩法',platform:'平台',stake:'投注金额',odds:'十进制赔率',return:'实际返还（含本金）',fee:'手续费',selection:'投注选择',combo:'单注/串关',status:'结算状态','placed-at':'投注时间','settled-at':'结算时间',legs:'串关分项' };
     names['start-text'] = '开赛时间原文';
@@ -98,7 +107,7 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     const applied = apply(candidates, true);
     const filled = applied && Object.keys(candidates).length > 0;
     if (filled) el('intake-panel').open = false;
-    status((filled ? '已自动填入待核对表单，尚未保存。' : '候选字段待核对，可确认后带入。') + draft.warnings.join('；'));
+    status((filled ? '已自动填入，核对后点“确认并保存”。' : '候选字段待核对。') + (types.length ? '类别来自图标候选匹配，请核对。' : '项目图标未匹配，请选择类别。') + draft.warnings.join('；'));
   }
   el('intake-parse').addEventListener('click', review);
   el('intake-apply').addEventListener('click', () => {
@@ -141,7 +150,9 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
       if (ticket !== generation || !isUnlocked()) { await created.terminate(); return; }
       worker = created;
       phase = '读取图片并识别文字';
-      const inputImage = await prepareReceiptImage(image);
+      const prepared = await prepareReceiptImage(image);
+      const inputImage = prepared.file;
+      gameIcons = prepared.icons;
       if (ticket !== generation || !isUnlocked()) return;
       const result = await created.recognize(inputImage);
       if (ticket !== generation || !isUnlocked()) return;
@@ -187,6 +198,7 @@ async function prepareReceiptImage(file) {
     if (!ctx) throw new Error('当前浏览器无法处理图片');
     ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(image,0,0,canvas.width,canvas.height);
     const pixels = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const icons = detectGameIcons(pixels);
     let sum = 0, count = 0;
     for (let i = 0; i < pixels.data.length; i += 160) { sum += (pixels.data[i]+pixels.data[i+1]+pixels.data[i+2])/3; count++; }
     const dark = sum/count < 100;
@@ -196,7 +208,8 @@ async function prepareReceiptImage(file) {
       pixels.data[i] = pixels.data[i+1] = pixels.data[i+2] = value;
     }
     ctx.putImageData(pixels,0,0);
-    return await new Promise((resolve,reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('图片处理失败')),'image/png'));
+    const output = await new Promise((resolve,reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('图片处理失败')),'image/png'));
+    return {file:output,icons};
   } finally { URL.revokeObjectURL(url); }
 }
 

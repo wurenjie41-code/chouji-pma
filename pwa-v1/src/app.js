@@ -48,6 +48,7 @@ const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () =>
     $('#wager-reviewed').checked = false;
   }
   if (fields.status) $('#wager-status').value = fields.status;
+  if (fields.status && fields.status !== 'open' && !fields['settled-at']) $('#wager-settled-unknown').checked = true;
   syncSettlementFields();
   for (const [field,value] of Object.entries(fields)) {
     const input = document.getElementById('wager-' + field);
@@ -416,138 +417,7 @@ function wagerCashChangeBetween(wagers, start, end) {
   }, 0);
 }
 
-function renderWagerTrend(container, wagers) {
-  const groups = new Map();
-  for (let offset = 6; offset >= 0; offset--) {
-    const day = localDateInput(-offset);
-    groups.set(day, { net: 0, has: false });
-  }
-  for (const wager of wagers) {
-    const day = localDateFromTimestamp(wager.placedAt);
-    if (!groups.has(day) || !isSettledForRoi(wager)) continue;
-    const row = groups.get(day);
-    row.net += wagerResult(wager);
-    row.has = true;
-  }
-  const values = [...groups.values()];
-  const max = Math.max(1, ...values.map((item) => Math.abs(item.net)));
-  container.replaceChildren();
-  for (const [day, item] of groups) {
-    const row = document.createElement("div");
-    row.className = "trend-row";
-    const label = document.createElement("span");
-    label.className = "trend-label";
-    label.textContent = formatDate(day);
-    const track = document.createElement("span");
-    track.className = "trend-track";
-    const bar = document.createElement("progress");
-    bar.className = `trend-bar ${item.net < 0 ? "loss" : "gain"}`;
-    bar.max = 100;
-    bar.value = item.has ? Math.max(4, Math.abs(item.net) / max * 100) : 0;
-    track.append(bar);
-    const amount = document.createElement("strong");
-    amount.className = `trend-value ${item.net < 0 ? "negative" : ""}`;
-    amount.textContent = item.has ? formatMoney(item.net) : "—";
-    row.append(label, track, amount);
-    container.append(row);
-  }
-}
-
-function renderMonthlyReview() {
-  const today = localDateInput();
-  const prefix = today.slice(0,7);
-  const days = Number(today.slice(-2));
-  const activity = [];
-  const values = [0];
-  let cumulative = 0;
-  for (let day = 1; day <= days; day++) {
-    const date = prefix + '-' + String(day).padStart(2,'0');
-    cumulative += session.state.wagers.filter(w => w.status !== 'open' && localDateFromTimestamp(w.settledAt) === date).reduce((sum,w) => sum + wagerResult(w),0);
-    values.push(cumulative);
-    const count = session.state.wagers.filter(w => localDateFromTimestamp(w.placedAt) === date).length;
-    const cell = document.createElement('span');
-    cell.className = count ? 'activity-day active' : 'activity-day';
-    cell.textContent = `${day}日 · ${count}笔`;
-    activity.push(cell);
-  }
-  $('#month-net').textContent = formatMoney(cumulative);
-  $('#month-activity').replaceChildren(...activity);
-  const limit = session.state.riskSettings.period === 'monthly' ? session.state.riskSettings.lossLimitMinor : null;
-  const low = Math.min(0,...values,limit == null ? 0 : -limit);
-  const high = Math.max(100,...values);
-  const y = value => 145 - (value-low)/(high-low || 1)*110;
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns,'svg');
-  svg.setAttribute('viewBox','0 0 360 180'); svg.setAttribute('role','img');
-  svg.setAttribute('aria-label', `本月截至今日累计净结果 ${formatMoney(cumulative)}，按结算日期。`);
-  const line = (value,color,label) => {
-    const node = document.createElementNS(ns,'line');
-    for (const [key,val] of Object.entries({x1:12,x2:348,y1:y(value),y2:y(value),stroke:color,'stroke-dasharray':'4 3'})) node.setAttribute(key,String(val));
-    const text = document.createElementNS(ns,'text'); text.setAttribute('x','12'); text.setAttribute('y',String(y(value)-5)); text.setAttribute('font-size','9'); text.textContent = label;
-    svg.append(node,text);
-  };
-  line(0,'#87928c','零线');
-  if (limit != null) line(-limit,'#ad5750',`月亏损上限参考 ${formatMoney(-limit)}`);
-  const curve = document.createElementNS(ns,'polyline');
-  curve.setAttribute('points',values.map((value,index) => `${12+index/days*336},${y(value)}`).join(' '));
-  curve.setAttribute('fill','none'); curve.setAttribute('stroke','#26745e'); curve.setAttribute('stroke-width','2');
-  svg.append(curve);
-  $('#month-result-chart').replaceChildren(svg);
-}
-
-function renderOverview() {
-  renderMonthlyReview();
-  const { info, wagers, metrics, openWagers, openStake, riskExposure, budgetUsed } = currentCycleData();
-  const settings = session.state.riskSettings;
-  $("#hero-caption").textContent = `${info.label}已结算投注净结果（按投注日期）`;
-  $("#budget-period-title").textContent = settings.period === "weekly" ? "本周预算" : "本月预算";
-  $("#settled-net").textContent = formatMoney(metrics.settledNet);
-  $("#settled-net").classList.toggle("negative", metrics.settledNet < 0);
-  $("#settled-stake").textContent = formatMoney(metrics.settledStake);
-  $("#open-stake").textContent = formatMoney(openStake);
-  $("#open-count").textContent = `${openWagers.length} 笔`;
-  $("#settled-roi").textContent = metrics.roi == null ? "—" : `${metrics.roi.toFixed(1)}%`;
-  const budget = settings.budgetMinor;
-  $("#budget-used").textContent = formatMoney(budgetUsed);
-  $("#budget-left").textContent = budget == null ? "—" : formatMoney(budget - budgetUsed);
-  $("#budget-remaining").textContent = budget == null ? "未设置" : `${formatMoney(budget - budgetUsed)} 剩余`;
-  $("#budget-remaining").classList.toggle("negative", budget != null && budgetUsed >= budget);
-  $("#budget-progress").value = budget ? Math.min(100, budgetUsed / budget * 100) : 0;
-  $("#budget-caption").textContent = `${info.label} · 按投注日期累计本金，赢款不会增加可用预算。${budget == null ? "请在“保护”中设置。" : ""}`;
-
-  const cycleRecords = session.state.records.filter((record) => record.date >= info.start && record.date <= info.end);
-  const legacyBetLines = cycleRecords.filter(isLegacyBetRecord);
-  $("#legacy-result-card").classList.toggle("hidden", legacyBetLines.length === 0);
-  $("#legacy-cycle-net").textContent = formatMoney(calculate(legacyBetLines).net);
-  const deposits = cycleRecords.filter((record) => record.kind === "deposit").reduce((sum, record) => sum + record.amountMinor, 0);
-  const withdrawals = cycleRecords.filter((record) => record.kind === "withdrawal").reduce((sum, record) => sum + record.amountMinor, 0);
-  const wagerCashChange = wagerCashChangeBetween(session.state.wagers, info.start, info.end);
-  const legacyCashChange = cycleRecords.reduce((sum, record) => sum + record.deltaMinor, 0);
-  $("#deposit-total").textContent = formatMoney(deposits);
-  $("#withdrawal-total").textContent = formatMoney(withdrawals);
-  $("#net-deposits").textContent = formatMoney(deposits - withdrawals);
-  $("#wager-cash-change").textContent = formatMoney(wagerCashChange);
-  $("#fund-change").textContent = formatMoney(legacyCashChange + wagerCashChange);
-  $("#fund-change").classList.toggle("negative", legacyCashChange + wagerCashChange < 0);
-
-  const sevenDays = session.state.wagers.filter((wager) => {
-    const date = localDateFromTimestamp(wager.placedAt);
-    return date >= localDateInput(-6) && date <= localDateInput();
-  });
-  const sevenMetrics = wagerMetrics(sevenDays);
-  $("#week-net").textContent = formatMoney(sevenMetrics.settledNet);
-  $("#week-net").classList.toggle("negative", sevenMetrics.settledNet < 0);
-  $("#week-stake").textContent = formatMoney(sevenMetrics.settledStake);
-  $("#week-return").textContent = formatMoney(sevenMetrics.returned);
-  renderWagerTrend($("#week-chart"), sevenDays);
-  const sortedWagers = [...session.state.wagers].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
-  const oldRecords = [...session.state.records].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
-  $("#overview-empty-state").classList.toggle("hidden", sortedWagers.length + oldRecords.length > 0);
-  const recent = $("#overview-recent-list");
-  const rows = sortedWagers.slice(0, 4).map((wager) => createWagerRow(wager));
-  if (rows.length < 4) rows.push(...oldRecords.slice(0, 4 - rows.length).map((record) => createEntryRow(record)));
-  recent.replaceChildren(...rows);
-}
+function renderOverview() { const wagers=[...session.state.wagers].sort((a,b)=>b.placedAt.localeCompare(a.placedAt)); $('#overview-recent-list').replaceChildren(...wagers.slice(0,4).map(wager=>createWagerRow(wager))); }
 
 function renderRecords() {
   const allWagers = [...session.state.wagers].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
@@ -1072,7 +942,7 @@ function localDateTimeInput(date = new Date()) {
 function renderLegEditor() {
   let legs;
   try { legs = JSON.parse($('#wager-legs').value || '[]'); } catch { legs = []; }
-  const names = {event:'比赛',selection:'投注选择',market:'玩法',stage:'局数 / 赛前滚球',odds:'赔率',startText:'开赛时间原文'};
+  const names = {event:'比赛',selection:'投注选择',market:'玩法',stage:'局数 / 赛前滚球',odds:'赔率',startText:'开赛时间原文',sport:'项目 / 类别'};
   $('#wager-leg-editor').replaceChildren(...legs.map((leg,index) => {
     const card = document.createElement('fieldset');
     const title = document.createElement('legend'); title.textContent = `分项 ${index+1}`; card.append(title);
@@ -1166,11 +1036,12 @@ function wagerBlockReasons(candidate, current) {
 async function saveWager(event) {
   event.preventDefault();
   if (!session || saveBusy) return;
+  if (event.submitter?.id === 'wager-save-button') $('#wager-reviewed').checked = true;
   if (wagerEntrySource === 'image' && !$('#wager-reviewed').checked) return setError('#wager-error','请先核对识别字段并勾选保存确认。');
   let legs = [];
   try { legs = JSON.parse($('#wager-legs').value || '[]'); if (!Array.isArray(legs) || legs.length > 30 || legs.some(leg => !leg || typeof leg.event !== 'string' || !leg.event.trim())) throw Error(); }
   catch { return setError('#wager-error','串关分项需为有效 JSON 数组，每项至少填写 event 比赛名称。'); }
-  if (legs.some(leg => Object.entries(leg).some(([key,value]) => !['event','selection','market','stage','odds','startText'].includes(key) || typeof value !== 'string' || value.length > 300))) return setError('#wager-error','串关分项字段或长度无效。');
+  if (legs.some(leg => Object.entries(leg).some(([key,value]) => !['event','selection','market','stage','odds','startText','sport'].includes(key) || typeof value !== 'string' || value.length > 300))) return setError('#wager-error','串关分项字段或长度无效。');
   if ($('#wager-combo').value === 'single' && legs.length) return setError('#wager-error','此记录含有串关分项，请选择串关或移除分项。');
   const stakeMinor = amountInputMinor($("#wager-stake").value);
   if (!Number.isSafeInteger(stakeMinor) || stakeMinor <= 0) return setError("#wager-error", "请输入有效投注金额，最多两位小数。");
@@ -1279,7 +1150,7 @@ function openNewWager() {
   $("#wager-form").reset();
   $("#wager-title").textContent = "记录投注";
   renderLegEditor();
-  $("#wager-save-button").textContent = "加密保存投注";
+  $("#wager-save-button").textContent = "确认并保存";
   $("#wager-placed-at").value = localDateTimeInput();
   $("#wager-settled-at").value = "";
   $("#wager-fee").value = "0";
