@@ -1,3 +1,4 @@
+import {parseReceipt} from './receipt.js';
 // Recognition is a draft. Nothing here writes to the ledger or selects a bet.
 export function parseIntake(text) {
   const chineseNumber = token => {
@@ -82,17 +83,19 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     status('识别结果只作草稿；金额、赔率、玩法、赛果需逐项核对。');
   }
   function review() {
-    candidates = parseIntake(el('intake-text').value);
-    const names = { event:'事件',sport:'类别',league:'联赛',market:'玩法',platform:'平台',stake:'投注金额',odds:'十进制赔率',return:'实际返还（含本金）',fee:'手续费' };
+    const draft = parseReceipt(el('intake-text').value, parseIntake(el('intake-text').value));
+    candidates = draft.fields;
+    const names = { event:'事件',sport:'类别',league:'联赛',market:'玩法',platform:'平台',stake:'投注金额',odds:'十进制赔率',return:'实际返还（含本金）',fee:'手续费',selection:'投注选择',combo:'单注/串关',status:'结算状态','placed-at':'投注时间','settled-at':'结算时间',legs:'串关分项' };
     el('intake-fields').replaceChildren(...Object.entries(candidates).map(([key,value]) => {
       const label = document.createElement('label');
       const box = document.createElement('input');
-      box.type = 'checkbox'; box.value = key; // Deliberately unchecked.
+      box.type = 'checkbox'; box.value = key; box.checked = true;
       label.append(box, document.createTextNode(`${names[key]}：${value}`));
       return label;
     }));
     el('intake-confirm').checked = false;
-    status(Object.keys(candidates).length ? '勾选核对过的字段，再确认带入；日期和赛果不会自动推断。' : '未找到明确标注的字段。可修改文字，例如“投注金额：50”“赔率：1.85”，再解析。');
+    const filled = apply(candidates, true);
+    status((filled ? '已自动填入待核对表单，尚未保存。' : '候选字段待核对，可确认后带入。') + draft.warnings.join('；'));
   }
   el('intake-parse').addEventListener('click', review);
   el('intake-apply').addEventListener('click', () => {
@@ -135,7 +138,9 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
       if (ticket !== generation || !isUnlocked()) { await created.terminate(); return; }
       worker = created;
       phase = '读取图片并识别文字';
-      const result = await created.recognize(image);
+      const inputImage = await prepareReceiptImage(image);
+      if (ticket !== generation || !isUnlocked()) return;
+      const result = await created.recognize(inputImage);
       if (ticket !== generation || !isUnlocked()) return;
       el('intake-text').value = result.data.text.slice(0,12000);
       review();
@@ -165,5 +170,30 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     } catch { status('此设备未能启动本机语音识别，请使用系统键盘听写。'); }
   });
   return { clear, cancel };
+}
+
+async function prepareReceiptImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    await new Promise((resolve,reject) => { image.onload = resolve; image.onerror = () => reject(new Error('无法解码图片，请选择 JPG 或 PNG')); image.src = url; });
+    const scale = Math.min(1,2400/Math.max(image.naturalWidth,image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1,Math.round(image.naturalWidth*scale)); canvas.height = Math.max(1,Math.round(image.naturalHeight*scale));
+    const ctx = canvas.getContext('2d',{willReadFrequently:true});
+    if (!ctx) throw new Error('当前浏览器无法处理图片');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(image,0,0,canvas.width,canvas.height);
+    const pixels = ctx.getImageData(0,0,canvas.width,canvas.height);
+    let sum = 0, count = 0;
+    for (let i = 0; i < pixels.data.length; i += 160) { sum += (pixels.data[i]+pixels.data[i+1]+pixels.data[i+2])/3; count++; }
+    const dark = sum/count < 100;
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      let value = pixels.data[i]*0.299+pixels.data[i+1]*0.587+pixels.data[i+2]*0.114;
+      if (dark) value = 255-value;
+      pixels.data[i] = pixels.data[i+1] = pixels.data[i+2] = value;
+    }
+    ctx.putImageData(pixels,0,0);
+    return await new Promise((resolve,reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('图片处理失败')),'image/png'));
+  } finally { URL.revokeObjectURL(url); }
 }
 

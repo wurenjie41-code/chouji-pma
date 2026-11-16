@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {parseReceipt} from '../src/receipt.js';
+const single = `投注记录详情\nExample A\n@1.94\n获胜者\n第2局 | 滚盘\nExample B VS Example A\n开赛时间:2026年11月15日 22:25\n单注 已结算\n投注时间\n2026年11月16日 00:22:12\n投注金额\n500.00\n返还金额\n970.00`;
+const one = parseReceipt(single);
+assert.equal(one.fields.event,'Example B vs Example A');
+assert.equal(one.fields.selection,'Example A');
+assert.equal(one.fields.odds,'1.94');
+assert.equal(one.fields.stake,'500.00');
+assert.equal(one.fields.return,'970.00');
+assert.equal(one.fields['placed-at'],'2026-11-16T00:22:12');
+assert.equal(one.fields['settled-at'],undefined);
+assert.equal(one.fields.status,'cashout');
+assert.equal(parseReceipt(single.replace('2026年11月16日','2026 年 11 月 16 日')).fields['placed-at'],'2026-11-16T00:22:12');
+assert.equal(parseReceipt(single.replace('Example A\n@','图 Example A 晶\n@')).fields.selection,'Example A');
+const combo = parseReceipt(`Example A @1.80\n获胜者\n全场 | 赛前\nExample A VS Example B\n开赛时间:2026年11月15日 12:00\nExample C @1.60\n获胜者\n全场 | 赛前\nExample C VS Example D\n开赛时间:2026年11月15日 13:00\n2串1 已结算\n投注金额 200.00\n返还金额 0.00`);
+assert.equal(combo.fields.combo,'parlay');
+assert.equal(combo.legs.length,2);
+assert.equal(combo.legs[0].odds,'1.80');
+assert.equal(combo.legs[1].odds,'1.60');
+assert.equal(combo.fields.odds,undefined);
+assert.equal(combo.fields.stake,'200.00');
+assert.equal(parseReceipt('投注金额 3621.000').fields.stake,'3621.00');
+assert.equal(parseReceipt('投注金额 12.345').fields.stake,undefined);
+assert.equal(parseReceipt('最高可赢 0.00').fields.return,undefined);
+assert.deepEqual(parseReceipt('A VS B\nC VS D\n投注金额 500').fields,{});
+assert.equal(parseReceipt(single.replace('11月16日','02月30日')).fields['placed-at'],undefined);
+console.log('Receipt layout checks passed: single, parlay, timestamps, missing fields, precision, truncated/multiple orders.');
+

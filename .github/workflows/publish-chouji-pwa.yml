@@ -40,6 +40,7 @@ jobs:
           node pwa-v1/scripts/package-ocr.mjs
           node pwa-v1/scripts/acceptance.mjs
           node pwa-v1/scripts/recognition-test.mjs
+          node pwa-v1/scripts/receipt-test.mjs
 
       - name: Assemble runtime files only
         run: |

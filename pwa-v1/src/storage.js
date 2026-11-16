@@ -267,6 +267,10 @@ function validateState(state, expectedSequence) {
   if (state.wagers != null && !Array.isArray(state.wagers)) throw new Error("备份投注数据结构无效。");
   if ((state.wagers?.length ?? 0) > 100_000) throw new Error("备份投注数量超出支持范围。");
   for (const wager of state.wagers ?? []) {
+    if (wager?.startText != null && (typeof wager.startText !== 'string' || wager.startText.length > 160)) throw new Error('开赛时间原文无效。');
+    if ((wager?.selection != null && (typeof wager.selection !== 'string' || wager.selection.length > 160))
+      || (wager?.settlementTimeUnknown != null && typeof wager.settlementTimeUnknown !== 'boolean')
+      || (wager?.legs != null && (!Array.isArray(wager.legs) || wager.legs.length > 30 || wager.legs.some(leg => !leg || typeof leg !== 'object' || typeof leg.event !== 'string' || !leg.event.trim() || Object.entries(leg).some(([key,value]) => !['event','selection','market','stage','odds','startText'].includes(key) || typeof value !== 'string' || value.length > 300))))) throw new Error('投注选择或串关分项无效。');
     const validStatus = ["open", "won", "lost", "void", "cashout"].includes(wager?.status);
     const settled = wager?.status !== "open";
     if (!wager || typeof wager.id !== "string" || !wager.id || ids.has(wager.id)
@@ -283,7 +287,7 @@ function validateState(state, expectedSequence) {
       || (wager.updatedAt != null && (typeof wager.updatedAt !== "string" || !Number.isFinite(Date.parse(wager.updatedAt))))
       || !["single", "parlay"].includes(wager.combo ?? "single")
       || (wager.oddsMilli != null && (!Number.isSafeInteger(wager.oddsMilli) || wager.oddsMilli < 1000 || wager.oddsMilli > 1_000_000))
-      || (settled && (!Number.isSafeInteger(wager.actualReturnMinor) || wager.actualReturnMinor < 0 || !Number.isFinite(Date.parse(wager.settledAt)) || Date.parse(wager.settledAt) < Date.parse(wager.placedAt)))
+      || (settled && (!Number.isSafeInteger(wager.actualReturnMinor) || wager.actualReturnMinor < 0 || (!(wager.settlementTimeUnknown === true && wager.settledAt === null) && (!Number.isFinite(Date.parse(wager.settledAt)) || Date.parse(wager.settledAt) < Date.parse(wager.placedAt)))))
       || (!settled && (wager.actualReturnMinor != null || wager.settledAt != null))) {
       throw new Error("备份中存在无效投注，导入已取消。");
     }

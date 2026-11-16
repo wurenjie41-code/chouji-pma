@@ -55,6 +55,7 @@
 
         <section id="ledger-screen" class="hidden" aria-label="本机账本">
           <div id="page-overview" class="app-page">
+            <section class="content-card image-import-home"><p class="eyebrow">图片入账</p><h2>导入截图或照片</h2><p>识别 → 自动填充 → 核对 → 保存</p><button class="primary-button" type="button" data-open-wager>开始图片入账</button><p class="small-note">单注与串关分别整理；疑似重复会提示，缺失字段不猜测。</p></section>
             <section class="hero-card">
               <div class="hero-topline">
                 <div>
@@ -355,6 +356,9 @@
           <label class="field-label" for="wager-league">联赛<input id="wager-league" list="league-options" maxlength="80" placeholder="可选" /></label>
         </div>
         <label class="field-label" for="wager-market">玩法 / 选择</label>
+        <label class="field-label" for="wager-selection">投注选择<input id="wager-selection" maxlength="160" placeholder="例如：某队、让分 −5.5" /></label>
+        <label class="field-label" for="wager-start-text">开赛时间（截图原文，非投注时间）<input id="wager-start-text" maxlength="160" /></label>
+        <details class="image-reference"><summary>串关分项（识别后可修改）</summary><p class="small-note">每项保留比赛、选择、玩法、阶段、赔率和开赛原文；本金只记在整单。</p><textarea id="wager-legs" class="hidden" rows="6" maxlength="12000" placeholder="[]"></textarea><div id="wager-leg-editor"></div><button id="add-wager-leg" class="secondary-button" type="button">添加分项</button></details>
         <input id="wager-market" type="text" maxlength="120" placeholder="例如：全场大小、主队胜" />
         <div class="field-grid">
           <label class="field-label" for="wager-platform">平台<input id="wager-platform" list="platform-options" maxlength="80" placeholder="可选" /></label>
@@ -365,7 +369,7 @@
           <label class="field-label" for="wager-combo">类型<select id="wager-combo"><option value="single">单关</option><option value="parlay">串关</option></select></label>
         </div>
         <label class="field-label" for="wager-placed-at">投注时间</label>
-        <input id="wager-placed-at" type="datetime-local" required />
+        <input id="wager-placed-at" type="datetime-local" step="1" required />
         <label class="field-label" for="wager-status">结算状态</label>
         <select id="wager-status"><option value="open">未结算</option><option value="won">已结算 · 赢</option><option value="lost">已结算 · 输</option><option value="void">已作废 / 退回</option><option value="cashout">提前结算 / 其他结算</option></select>
         <div id="settlement-fields" class="hidden">
@@ -374,7 +378,8 @@
           <label class="field-label" for="wager-fee">手续费（CNY）</label>
           <input id="wager-fee" type="number" min="0" max="999999999.99" step="0.01" inputmode="decimal" value="0" />
           <label class="field-label" for="wager-settled-at">结算时间</label>
-          <input id="wager-settled-at" type="datetime-local" />
+          <input id="wager-settled-at" type="datetime-local" step="1" />
+          <label><input id="wager-settled-unknown" type="checkbox" />结算时间未显示，保留为未知（不纳入结算日统计）</label>
           <label class="field-label" for="wager-result">赛果 / 结算说明<input id="wager-result" type="text" maxlength="120" /></label>
         </div>
         <label class="field-label" for="wager-tags">标签 <span class="muted">用逗号分隔</span></label>
@@ -385,6 +390,7 @@
         <input id="wager-state" type="text" maxlength="120" placeholder="例如：平静、疲惫、刚经历亏损" />
         <p class="small-note">来源会标记为手动录入或图片对照；原图片不会保留。实际返还包含返还本金；投注净结果 = 实际返还 − 投注额 − 手续费。未结算投注会占用风险敞口。</p>
         <p id="wager-error" class="inline-error" role="alert"></p>
+        <label><input id="wager-reviewed" type="checkbox" />已核对比赛、金额、赔率、玩法、时间及结算信息</label>
         <button id="wager-save-button" class="primary-button save-button" type="submit">加密保存投注</button>
         <datalist id="sports-options"></datalist><datalist id="league-options"></datalist><datalist id="platform-options"></datalist>
       </form>

@@ -19,4 +19,5 @@ Secrets.xcconfig
 node_modules/
 pwa-v1/vendor/
 pwa-v1/ocr-engine/sample.png
+pwa-v1/ocr-engine/private-fixtures/
 

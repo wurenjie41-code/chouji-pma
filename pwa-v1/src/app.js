@@ -39,12 +39,23 @@ let wagerPreviewUrl = null;
 let wagerPreviewFile = null;
 let wagerEntrySource = "manual";
 let wagerOriginalSource = "manual";
-const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () => Boolean(session && wagerDialog.open), apply: fields => {
+const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () => Boolean(session && wagerDialog.open), apply: (fields, automatic = false) => {
+  if (!session || (automatic && editingWagerId)) return false;
+  if (automatic) {
+    for (const field of ['event','stake','odds','return','placed-at','settled-at','selection','legs','sport','league','market','platform','start-text']) document.getElementById('wager-' + field).value = '';
+    $('#wager-status').value = 'open'; $('#wager-combo').value = 'single';
+    $('#wager-settled-unknown').checked = false;
+    $('#wager-reviewed').checked = false;
+  }
+  if (fields.status) $('#wager-status').value = fields.status;
+  syncSettlementFields();
   for (const [field,value] of Object.entries(fields)) {
     const input = document.getElementById('wager-' + field);
     if (input) input.value = value.slice(0, input.maxLength > 0 ? input.maxLength : 160);
   }
+  renderLegEditor();
   setError('#wager-error', '辅助录入已带入，请检查结算状态、日期及所有字段后保存。');
+  return true;
 } });
 
 function formatMoney(minor) {
@@ -195,6 +206,7 @@ function auditFields(entity, value) {
   if (entity === "wager") return [
     ["event", "比赛 / 事件", value.event], ["sport", "运动 / 类别", value.sport || "未填写"], ["league", "联赛", value.league || "未填写"],
     ["market", "玩法", value.market || "未填写"], ["platform", "平台", value.platform || "未填写"],
+    ['selection','投注选择',value.selection || '未填写'], ['startText','开赛原文',value.startText || '未填写'], ['legs','串关分项',JSON.stringify(value.legs || [])],
     ["oddsMilli", "赔率", value.oddsMilli == null ? "未填写" : (value.oddsMilli / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")],
     ["stakeMinor", "投注金额", formatMoney(value.stakeMinor)], ["combo", "投注类型", value.combo === "parlay" ? "串关" : "单关"],
     ["status", "结算状态", WAGER_STATUS[value.status] ?? value.status],
@@ -320,6 +332,12 @@ function createWagerRow(wager, withActions = true) {
     ? `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 未结算${wager.note ? ` · ${wager.note}` : ""}`
     : `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 返还 ${formatMoney(wager.actualReturnMinor)} · 手续费 ${formatMoney(wager.feeMinor)} · ${wager.settledAt ? `结算 ${formatDate(localDateFromTimestamp(wager.settledAt), true)}` : ""}${wager.note ? ` · ${wager.note}` : ""}`;
   details.append(title, subtitle, detail);
+  if (wager.selection || wager.settlementTimeUnknown || wager.legs?.length) {
+    const extra = document.createElement('details');
+    const summary = document.createElement('summary'); summary.textContent = `${wager.selection || '查看分项'}${wager.settlementTimeUnknown ? ' · 结算时间未知' : ''}`; extra.append(summary);
+    for (const leg of wager.legs || []) { const line = document.createElement('p'); line.textContent = [leg.event,leg.selection,leg.market,leg.stage,leg.odds ? '@'+leg.odds : '',leg.startText].filter(Boolean).join(' · '); extra.append(line); }
+    details.append(extra);
+  }
   const amount = document.createElement("strong");
   amount.className = `entry-amount ${wager.status === "open" ? "pending" : wagerResult(wager) < 0 ? "out" : "in"}`;
   amount.textContent = wager.status === "open" ? `未结算 ${formatMoney(wager.stakeMinor)}` : formatMoney(wagerResult(wager));
@@ -375,7 +393,8 @@ function currentCycleData(sourceWagers = session.state.wagers) {
   const legacyNet = calculate(legacyBetLines).net;
   const metrics = wagerMetrics(wagers);
   const settledCycleNet = settledInCycle.reduce((sum, wager) => sum + wagerResult(wager), 0);
-  const realizedLoss = Math.max(0, -settledCycleNet) + Math.max(0, -legacyNet);
+  const unknownDateLoss = sourceWagers.filter(wager => wager.status !== 'open' && wager.settlementTimeUnknown).reduce((sum,wager) => sum + Math.max(0,-wagerResult(wager)),0);
+  const realizedLoss = Math.max(0, -settledCycleNet) + Math.max(0, -legacyNet) + unknownDateLoss;
   const openStake = openWagers.reduce((sum, wager) => sum + wager.stakeMinor, 0);
   const riskExposure = realizedLoss + openStake;
   const legacyBudget = legacy.reduce((sum, item) => sum + item.amountMinor, 0);
@@ -1050,6 +1069,25 @@ function localDateTimeInput(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function renderLegEditor() {
+  let legs;
+  try { legs = JSON.parse($('#wager-legs').value || '[]'); } catch { legs = []; }
+  const names = {event:'比赛',selection:'投注选择',market:'玩法',stage:'局数 / 赛前滚球',odds:'赔率',startText:'开赛时间原文'};
+  $('#wager-leg-editor').replaceChildren(...legs.map((leg,index) => {
+    const card = document.createElement('fieldset');
+    const title = document.createElement('legend'); title.textContent = `分项 ${index+1}`; card.append(title);
+    for (const [key,name] of Object.entries(names)) {
+      const label = document.createElement('label'); label.className = 'field-label'; label.textContent = name;
+      const input = document.createElement('input'); input.value = leg[key] || ''; input.maxLength = 300;
+      input.addEventListener('input', () => { leg[key] = input.value; $('#wager-legs').value = JSON.stringify(legs); $('#wager-reviewed').checked = false; });
+      label.append(input); card.append(label);
+    }
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = '移除此分项';
+    remove.addEventListener('click', () => { legs.splice(index,1); $('#wager-legs').value = JSON.stringify(legs); renderLegEditor(); $('#wager-reviewed').checked = false; });
+    card.append(remove); return card;
+  }));
+}
+
 function updateWagerImageNote() {
   const note = $("#wager-image-note");
   if (wagerPreviewUrl) {
@@ -1124,6 +1162,12 @@ function wagerBlockReasons(candidate, current) {
 async function saveWager(event) {
   event.preventDefault();
   if (!session || saveBusy) return;
+  if (wagerEntrySource === 'image' && !$('#wager-reviewed').checked) return setError('#wager-error','请先核对识别字段并勾选保存确认。');
+  let legs = [];
+  try { legs = JSON.parse($('#wager-legs').value || '[]'); if (!Array.isArray(legs) || legs.length > 30 || legs.some(leg => !leg || typeof leg.event !== 'string' || !leg.event.trim())) throw Error(); }
+  catch { return setError('#wager-error','串关分项需为有效 JSON 数组，每项至少填写 event 比赛名称。'); }
+  if (legs.some(leg => Object.entries(leg).some(([key,value]) => !['event','selection','market','stage','odds','startText'].includes(key) || typeof value !== 'string' || value.length > 300))) return setError('#wager-error','串关分项字段或长度无效。');
+  if ($('#wager-combo').value === 'single' && legs.length) return setError('#wager-error','此记录含有串关分项，请选择串关或移除分项。');
   const stakeMinor = amountInputMinor($("#wager-stake").value);
   if (!Number.isSafeInteger(stakeMinor) || stakeMinor <= 0) return setError("#wager-error", "请输入有效投注金额，最多两位小数。");
   const status = $("#wager-status").value;
@@ -1137,9 +1181,11 @@ async function saveWager(event) {
   if (placed.getTime() > Date.now() + 5 * 60 * 1000) return setError("#wager-error", "投注时间不能晚于当前时间；请只录入已实际发生的投注。");
   let settledAt = null;
   if (settled) {
-    settledAt = new Date($("#wager-settled-at").value || localDateTimeInput());
+    settledAt = $('#wager-settled-unknown').checked ? null : new Date($("#wager-settled-at").value);
+    if (settledAt !== null) {
     if (Number.isNaN(settledAt.getTime()) || settledAt < placed) return setError("#wager-error", "结算时间无效，且不能早于投注时间。");
     if (settledAt.getTime() > Date.now() + 5 * 60 * 1000) return setError("#wager-error", "结算时间不能晚于当前时间。");
+    }
     const net = actualReturnMinor - stakeMinor - feeMinor;
     if ((status === "won" && net <= 0) || (status === "lost" && net >= 0)) {
       if (!confirm("赛果标签与实际净结果不一致。请核对返还是否包含本金及手续费；如属走盘、半赢半输等特殊结算，可选择“其他结算”。仍按当前内容保存？")) return;
@@ -1173,7 +1219,11 @@ async function saveWager(event) {
     status,
     actualReturnMinor,
     feeMinor,
-    settledAt: settled ? settledAt.toISOString() : null,
+    settledAt: settled && settledAt ? settledAt.toISOString() : null,
+    settlementTimeUnknown: settled && !settledAt,
+    selection: $('#wager-selection').value.trim(),
+    startText: $('#wager-start-text').value.trim(),
+    legs,
     result: $("#wager-result").value.trim(),
     tags,
     note: $("#wager-note").value.trim(),
@@ -1211,8 +1261,7 @@ function syncSettlementFields() {
   const settled = $("#wager-status").value !== "open";
   $("#settlement-fields").classList.toggle("hidden", !settled);
   $("#wager-return").required = settled;
-  $("#wager-settled-at").required = settled;
-  if (settled && !$("#wager-settled-at").value) $("#wager-settled-at").value = localDateTimeInput();
+  $("#wager-settled-at").required = settled && !$('#wager-settled-unknown').checked;
   if (!settled) {
     $("#wager-return").value = "";
     $("#wager-settled-at").value = "";
@@ -1225,6 +1274,7 @@ function openNewWager() {
   clearWagerImagePreview(false);
   $("#wager-form").reset();
   $("#wager-title").textContent = "记录投注";
+  renderLegEditor();
   $("#wager-save-button").textContent = "加密保存投注";
   $("#wager-placed-at").value = localDateTimeInput();
   $("#wager-settled-at").value = "";
@@ -1249,6 +1299,12 @@ function openEditWager(id) {
   $("#wager-league").value = wager.league;
   $("#wager-market").value = wager.market;
   $("#wager-platform").value = wager.platform;
+  $('#wager-selection').value = wager.selection ?? '';
+  $('#wager-legs').value = wager.legs?.length ? JSON.stringify(wager.legs,null,2) : '';
+  $('#wager-start-text').value = wager.startText ?? '';
+  renderLegEditor();
+  $('#wager-settled-unknown').checked = Boolean(wager.settlementTimeUnknown);
+  $('#wager-reviewed').checked = false;
   $("#wager-odds").value = wager.oddsMilli == null ? "" : (wager.oddsMilli / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   $("#wager-stake").value = (wager.stakeMinor / 100).toFixed(2);
   $("#wager-combo").value = wager.combo ?? "single";
@@ -1586,6 +1642,7 @@ function exportCsv() {
 
   const headers = ["记录类别", "投注/流水时间", "结算时间", "比赛/事件", "运动/类别", "联赛", "玩法", "平台", "赔率", "记录金额(CNY)", "类型", "结算状态", "实际返还(CNY)", "投注净结果(CNY)", "手续费(CNY)", "赛果", "标签", "下注前状态", "资金变动(CNY)", "备注", "来源"];
   const numericColumns = new Set([8, 9, 12, 13, 14, 18]);
+  headers.push('投注选择','开赛时间原文','串关分项','结算时间未知');
   const rows = [headers];
   for (const wager of session.state.wagers) {
     const cashChange = -wager.stakeMinor + (wager.status === "open" ? 0 : wager.actualReturnMinor - wager.feeMinor);
@@ -1595,6 +1652,7 @@ function exportCsv() {
       wager.status === "open" ? "" : minorCsv(wager.actualReturnMinor), wager.status === "open" ? "" : minorCsv(wagerResult(wager)),
       wager.status === "open" ? "" : minorCsv(wager.feeMinor), wager.result, (wager.tags ?? []).join("; "), wager.beforeState,
       minorCsv(cashChange), wager.note, wager.source === "image" ? "图片对照" : "手工录入",
+      wager.selection ?? '', wager.startText ?? '', JSON.stringify(wager.legs ?? []), wager.settlementTimeUnknown ? '是' : '否',
     ]);
   }
   for (const record of session.state.records) {
@@ -1603,6 +1661,7 @@ function exportCsv() {
       legacy ? "旧版未关联流水" : "资金流水", record.date, "", "", "", "", "", "", "", minorCsv(record.amountMinor),
       TYPE[record.kind]?.label ?? record.kind, legacy ? "结算状态未知" : "资金记录", "", "", "", "", "", "", minorCsv(record.deltaMinor),
       record.note, legacy ? "旧版记录" : "手工录入",
+      '', '', '', '',
     ]);
   }
   const content = `\uFEFF${rows.map((row) => row.map((value, index) => csvCell(value, numericColumns.has(index))).join(",")).join("\r\n")}`;
@@ -1690,6 +1749,13 @@ $$(`[data-wager-filter]`).forEach((button) => button.addEventListener("click", (
   renderRecords();
 }));
 $("#wager-status").addEventListener("change", syncSettlementFields);
+$('#wager-settled-unknown').addEventListener('change', syncSettlementFields);
+$('#add-wager-leg').addEventListener('click', () => {
+  const legs = JSON.parse($('#wager-legs').value || '[]');
+  if (legs.length >= 30) return;
+  legs.push({event:'',selection:'',market:'',stage:'',odds:'',startText:''});
+  $('#wager-legs').value = JSON.stringify(legs); $('#wager-combo').value = 'parlay'; renderLegEditor();
+});
 async function saveEntryDefaults(clear = false) {
   if (!session || saveBusy) return;
   const entryDefaults = {};
