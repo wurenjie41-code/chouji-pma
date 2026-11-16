@@ -24,6 +24,8 @@ export function parseReceipt(text, baseline = {}) {
   };
   money('投注金额|下注金额|本金','stake');
   money('返还金额|实际返还|返还','return');
+  const labeledOdds=unique(/(?:十进制赔率|赔率|odds)\s*[:：]?\s*(\d+(?:\.\d+)?)/gi);
+  if(labeledOdds && Number(labeledOdds)>=1 && Number(labeledOdds)<=1000)fields.odds=labeledOdds;
   const datetime = labels => {
     const value = unique(new RegExp('(?:' + labels + ')\\s*[:：]?\\s*(\\d{4}[年/-]\\d{1,2}[月/-]\\d{1,2}日?\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)','g'));
     if (!value) return undefined;
@@ -52,14 +54,14 @@ export function parseReceipt(text, baseline = {}) {
       || before.find(s => /^[A-Za-z][A-Za-z0-9 ._-]*(?:让分[+−-]?\d+(?:\.\d+)?)?$/.test(s) && !/DB电竞/i.test(s));
     const market = before.filter(s => /获胜者|首先|杀敌|让分|大小|回合/.test(s) && s !== selection).join(' · ');
     const stage = before.find(s => /赛前|滚球|滚盘/.test(s)) || '';
-    const teams = line.replace(/^战队\s*[:：]?\s*/,'').split(/\s*-?\s*VS\s*-?\s*/i).map(s=>s.trim());
+    const teams = line.replace(/^(?:战队|比赛|事件)\s*[:：]?\s*/,'').split(/\s*-?\s*VS\s*-?\s*/i).map(s=>s.trim());
     const selectionSource = selection || before.join(' ');
     const selectedTeams = teams.filter(team => team && selectionSource.toLowerCase().includes(team.toLowerCase()));
     if (selectedTeams.length === 1) selection = selectedTeams[0] + (selectionSource.match(/让分\s*[+−-]?\s*\d+(?:\.\d+)?/)?.[0] || '');
     else { const fromHeader=teams.filter(team=>team && before.join(' ').toLowerCase().includes(team.toLowerCase())); if(fromHeader.length===1) selection=fromHeader[0]; }
     const startLine = lines.slice(index+1,index+3).join(' ');
     const start = startLine.match(/(?:开赛时间|开始时间)\s*[:：]?\s*(\d{4}[年/-].*)/);
-    return {event:line.replace(/^战队\s*[:：]?\s*/,'').replace(/\s*-?\s*VS\s*-?\s*/i,' vs '),selection:selection || '',market,stage,odds:oddsMatch ? oddsMatch[1] : '',startText:start?.[1] || ''};
+    return {event:line.replace(/^(?:战队|比赛|事件)\s*[:：]?\s*/,'').replace(/\s*-?\s*VS\s*-?\s*/i,' vs '),selection:selection || '',market,stage,odds:oddsMatch ? oddsMatch[1] : '',startText:start?.[1] || ''};
   });
   if (legs.length === 1) {
     fields.event = legs[0].event;

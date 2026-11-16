@@ -1,7 +1,7 @@
 const scopeNamespace = new URL(self.registration.scope).pathname.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "root";
 const CACHE_PREFIX = `chouji-shell-${scopeNamespace}-`;
-const CACHE_NAME = `${CACHE_PREFIX}v1-15`;
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./src/app.js", "./src/intake.js", "./src/receipt.js", "./src/game-icons.js", "./src/storage.js", "./src/styles.css", "./icons/icon.svg", "./icons/apple-touch-icon.png", "./icons/icon-192.png", "./icons/icon-512.png"];
+const CACHE_NAME = `${CACHE_PREFIX}v2-design-1`;
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./src/app.js", "./src/intake.js", "./src/receipt.js", "./src/game-icons.js", "./src/storage.js", "./src/design.css", "./src/design.js", "./icons/icon.svg", "./icons/apple-touch-icon.png", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));

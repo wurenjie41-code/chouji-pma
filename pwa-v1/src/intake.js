@@ -38,7 +38,7 @@ export function parseIntake(text) {
   return fields;
 }
 
-export function setupIntake({ getImage, isUnlocked, apply }) {
+export function setupIntake({ getImage, isUnlocked, apply, onDraft=()=>{}, onStatus=()=>{} }) {
   const el = id => document.getElementById(id);
   let worker, recognition, generation = 0, candidates = {}, modelDownload, gameIcons = [];
   const base = new URL('../vendor/', import.meta.url).href;
@@ -66,7 +66,7 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
       throw error;
     } finally { clearTimeout(timeout); modelDownload = null; el('intake-download').disabled = false; }
   }
-  const status = message => { el('intake-status').textContent = message; };
+  const status = message => { el('intake-status').textContent = message; const progress=el('review-progress');if(progress)progress.textContent=message;onStatus(message); };
   function cancel() {
     modelDownload?.abort();
     generation++;
@@ -107,8 +107,9 @@ export function setupIntake({ getImage, isUnlocked, apply }) {
     el('intake-confirm').checked = false;
     const applied = apply(candidates, true);
     const filled = applied && Object.keys(candidates).length > 0;
+    if (filled) onDraft();
     if (filled) el('intake-panel').open = false;
-    status((filled ? '已自动填入，核对后点“确认并保存”。' : '候选字段待核对。') + (types.length ? '类别来自图标候选匹配，请核对。' : '项目图标未匹配，请选择类别。') + draft.warnings.join('；'));
+    status((filled ? '已自动填入，核对后点“确认并保存”。' : '候选字段待核对。') + (types.length ? '类别来自图标候选匹配，请核对。' : draft.fields.sport?'已从文字提取类别，请核对。':'项目未识别，请选择类别。') + draft.warnings.join('；'));
   }
   el('intake-parse').addEventListener('click', review);
   el('intake-apply').addEventListener('click', () => {

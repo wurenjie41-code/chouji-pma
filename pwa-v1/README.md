@@ -1,6 +1,6 @@
 # 筹记（WagerMemo）PWA V1
 
-最新交付与未完成项见 `RELEASE_STATUS.md`。2026-11-16 已增加本机中英文 OCR、确认后字段带入、设备端语音能力检测、常用分类、月度零线图及每日活动图；最终实机验收尚未完成。OCR 首次下载需要联网，模型随本站部署。
+最新交付与未完成项见 [九屏 D1 验收记录](D1_RELEASE.md)。2026-11-17 已替换为九屏界面，主流程为导入/拍照 → 自动识别填充 → 确认保存，支持多图逐张处理和图片哈希防重复。最终实机验收尚未完成。OCR 首次下载需要联网，模型随本站部署。下方早期功能说明若与 D1 冲突，以 D1 为准。
 
 运行于 iPhone Safari/主屏幕的本机资金记录工具。纯 HTML、CSS、JavaScript，无框架、后端或外部数据源；Windows 可开发和发布，不需要本机 Mac/Xcode。旧 Swift 工程及其他资料仍保留在仓库其他目录。
 
@@ -50,7 +50,8 @@ GitHub Pages 是公开静态托管。公开的是程序和图标，不是存放�
 - `index.html`：页面与安装元数据
 - `src/app.js`：页面渲染、分析与交互
 - `src/storage.js`：IndexedDB、WebCrypto、快照、加密备份
-- `src/styles.css`：响应式界面
+- `src/design.css`：九屏响应式界面；旧样式与页面已移至 docs/ui-archive
+- `src/design.js`：页面筛选、详情与图表
 - `sw.js`：离线静态文件缓存
 - `serve.mjs`：Windows 本机预览服务器
 

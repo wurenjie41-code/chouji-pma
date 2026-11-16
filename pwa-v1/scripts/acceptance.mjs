@@ -15,6 +15,7 @@ assert.ok(!html.includes('compatibility-metrics'),'legacy UI removed');
 for (const [, id] of source.matchAll(/\$\("#([^" ]+)"\)/g)) assert.ok(ids.includes(id), `missing ${id}`);
 const context = vm.createContext({ document: { querySelector: () => ({}), querySelectorAll: () => [] }, Intl, Date, console, assert });
 context.setupIntake = () => ({clear(){},cancel(){}});
+context.setupDesign = () => ({render(){},filterRecord(){return true;},cashFilter(){return true;}});
 vm.runInContext(source.slice(0, source.indexOf('forms.create.addEventListener')).replace(/^import .*;\r?\n/gm,''), context);
 vm.runInContext(`
 const today = localDateTimeInput();

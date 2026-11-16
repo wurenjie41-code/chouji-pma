@@ -41,6 +41,7 @@ jobs:
           node pwa-v1/scripts/acceptance.mjs
           node pwa-v1/scripts/recognition-test.mjs
           node pwa-v1/scripts/receipt-test.mjs
+          node pwa-v1/scripts/design-test.mjs
 
       - name: Assemble runtime files only
         run: |

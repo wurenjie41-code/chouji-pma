@@ -245,6 +245,7 @@ function isValidDate(value) {
 }
 
 function validateState(state, expectedSequence) {
+  if(state?.preferences!=null && (typeof state.preferences!=='object'||Array.isArray(state.preferences)||!['placed','settled'].includes(state.preferences.analysisDateBasis)))throw new Error('统计默认口径无效。');
   if (state?.entryDefaults != null && (typeof state.entryDefaults !== 'object' || Array.isArray(state.entryDefaults)
     || Object.entries(state.entryDefaults).some(([key,value]) => !['sport','league','market','platform','combo'].includes(key) || typeof value !== 'string' || value.length > ({sport:60,league:80,market:120,platform:80,combo:6}[key]))
     || (state.entryDefaults.combo != null && !['single','parlay'].includes(state.entryDefaults.combo)))) throw new Error('备份常用分类无效。');
@@ -267,6 +268,7 @@ function validateState(state, expectedSequence) {
   if (state.wagers != null && !Array.isArray(state.wagers)) throw new Error("备份投注数据结构无效。");
   if ((state.wagers?.length ?? 0) > 100_000) throw new Error("备份投注数量超出支持范围。");
   for (const wager of state.wagers ?? []) {
+    if(wager?.imageFingerprint!=null && (typeof wager.imageFingerprint!=='string'|| !/^[0-9a-f]{64}$/.test(wager.imageFingerprint)))throw new Error('图片指纹无效。');
     if (wager?.startText != null && (typeof wager.startText !== 'string' || wager.startText.length > 160)) throw new Error('开赛时间原文无效。');
     if ((wager?.selection != null && (typeof wager.selection !== 'string' || wager.selection.length > 160))
       || (wager?.settlementTimeUnknown != null && typeof wager.settlementTimeUnknown !== 'boolean')

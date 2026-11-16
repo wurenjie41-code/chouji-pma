@@ -1,5 +1,6 @@
 import { commitState, createVault, exportEncryptedBackup, hasVault, importEncryptedBackup, readStorageHealth, requestPersistentStorage, restorePrevious, unlockVault } from "./storage.js";
 import { setupIntake } from "./intake.js";
+import {setupDesign,drawCumulative} from "./design.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -18,7 +19,7 @@ const TYPE = {
 };
 const WAGER_STATUS = { open: "未结算", won: "已结算 · 赢", lost: "已结算 · 输", void: "已作废 / 退回", cashout: "提前结算 / 其他结算" };
 const STAKE_BANDS = ["≤ ¥10", "¥10.01–¥50", "¥50.01–¥100", "> ¥100"];
-const PAGES = ["overview", "records", "analysis", "settings", "risk"];
+const PAGES = ["overview","records","analysis","settings","risk","cash","categories","distribution","detail"];
 
 let session = null;
 let deferredInstallPrompt = null;
@@ -39,7 +40,8 @@ let wagerPreviewUrl = null;
 let wagerPreviewFile = null;
 let wagerEntrySource = "manual";
 let wagerOriginalSource = "manual";
-const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () => Boolean(session && wagerDialog.open), apply: (fields, automatic = false) => {
+let importJobs = [], activeImportJob = null;
+const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () => Boolean(session && wagerDialog.open), onDraft:()=>{if(activeImportJob){activeImportJob.phase='待确认';renderImportJobs();}},onStatus:message=>{if(activeImportJob?.phase==='识别中'){activeImportJob.message=message;renderImportJobs();}}, apply: (fields, automatic = false) => {
   if (!session || (automatic && editingWagerId)) return false;
   if (automatic) {
     for (const field of ['event','stake','odds','return','placed-at','settled-at','selection','legs','sport','league','market','platform','start-text']) document.getElementById('wager-' + field).value = '';
@@ -58,6 +60,16 @@ const intake = setupIntake({ getImage: () => wagerPreviewFile, isUnlocked: () =>
   setError('#wager-error', '辅助录入已带入，请检查结算状态、日期及所有字段后保存。');
   return true;
 } });
+
+const design=setupDesign({state:()=>session?.state,go:setPage,redraw:render,edit:openEditWager,remove:deleteWager,newWager:openNewWager,money:formatMoney,date:localDateFromTimestamp,net:wagerResult,cashChange:wagerCashChangeBetween,budgetUsed:()=>currentCycleData().budgetUsed,preference:saveAnalysisPreference,info:(title,message)=>alert(title+'\n\n'+message)});
+
+async function saveAnalysisPreference(value) {
+  if(!session||saveBusy||!['placed','settled'].includes(value))return;
+  saveBusy=true;
+  try{const next={...session.state,sequence:session.state.sequence+1,preferences:{...session.state.preferences,analysisDateBasis:value}};await commitState(next,session.key);session.state=next;analysisDateBasis=value;render();}
+  catch(error){alert('默认口径保存失败：'+error.message);}
+  finally{saveBusy=false;finishPendingLock();}
+}
 
 function formatMoney(minor) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(minor / 100);
@@ -83,6 +95,7 @@ function showVault(createMode) {
 }
 
 function showLedger() {
+  if (["placed","settled"].includes(session.state.preferences?.analysisDateBasis)) analysisDateBasis=session.state.preferences.analysisDateBasis;
   screens.vault.classList.add("hidden");
   screens.ledger.classList.remove("hidden");
   $("#lock-button").classList.remove("hidden");
@@ -92,6 +105,7 @@ function showLedger() {
 }
 
 function lockApp() {
+  importJobs=[];activeImportJob=null;renderImportJobs();
   intake.clear();
   session = null;
   if (dialog.open) dialog.close();
@@ -265,7 +279,7 @@ function setPage(page) {
   activePage = page;
   for (const name of PAGES) $(`#page-${name}`).classList.toggle("hidden", name !== page);
   $$(`[data-page]`).forEach((button) => {
-    const selected = button.dataset.page === (page === 'risk' ? 'settings' : page);
+    const selected = button.dataset.page === (['risk'].includes(page)?'settings':['detail','cash'].includes(page)?'records':['categories','distribution'].includes(page)?'analysis':page);
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-current", selected ? "page" : "false");
   });
@@ -313,68 +327,12 @@ function createEntryRow(record, withActions = true) {
   return row;
 }
 
-function createWagerRow(wager, withActions = true) {
-  const row = document.createElement("li");
-  row.className = "entry-row wager-row";
-  const mark = document.createElement("span");
-  mark.className = `entry-mark ${wager.status === "open" ? "pending" : wagerResult(wager) < 0 ? "out" : "in"}`;
-  mark.textContent = wager.status === "open" ? "…" : wager.status === "lost" ? "−" : wager.status === "won" ? "+" : "✓";
-  const details = document.createElement("div");
-  details.className = "entry-details";
-  const title = document.createElement("strong");
-  title.textContent = wager.event;
-  const meta = [wager.sport, wager.league, wager.market, wager.platform, wager.combo === "parlay" ? "串关" : "单关", WAGER_STATUS[wager.status], wager.source === "image" ? "图片对照" : "手工录入", wager.result].filter(Boolean).join(" · ");
-  const subtitle = document.createElement("span");
-  subtitle.textContent = `${formatDate(localDateFromTimestamp(wager.placedAt), true)} · ${meta}`;
-  const detail = document.createElement("span");
-  detail.className = "wager-detail";
-  const odds = wager.oddsMilli == null ? "赔率未填" : `赔率 ${(wager.oddsMilli / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
-  detail.textContent = wager.status === "open"
-    ? `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 未结算${wager.note ? ` · ${wager.note}` : ""}`
-    : `投注 ${formatMoney(wager.stakeMinor)} · ${odds} · 返还 ${formatMoney(wager.actualReturnMinor)} · ${wager.settledAt ? `结算 ${formatDate(localDateFromTimestamp(wager.settledAt), true)}` : ""}${wager.note ? ` · ${wager.note}` : ""}`;
-  details.append(title, subtitle, detail);
-  if (wager.selection || wager.settlementTimeUnknown || wager.legs?.length) {
-    const extra = document.createElement('details');
-    const summary = document.createElement('summary'); summary.textContent = `${wager.selection || '查看分项'}${wager.settlementTimeUnknown ? ' · 结算时间未知' : ''}`; extra.append(summary);
-    for (const leg of wager.legs || []) { const line = document.createElement('p'); line.textContent = [leg.event,leg.selection,leg.market,leg.stage,leg.odds ? '@'+leg.odds : '',leg.startText].filter(Boolean).join(' · '); extra.append(line); }
-    details.append(extra);
-  }
-  const amount = document.createElement("strong");
-  amount.className = `entry-amount ${wager.status === "open" ? "pending" : wagerResult(wager) < 0 ? "out" : "in"}`;
-  amount.textContent = wager.status === "open" ? `未结算 ${formatMoney(wager.stakeMinor)}` : formatMoney(wagerResult(wager));
-  row.append(mark, details, amount);
-  if (withActions) {
-    const actions = document.createElement("div");
-    actions.className = "entry-actions";
-    const edit = document.createElement("button");
-    edit.className = "entry-action";
-    edit.type = "button";
-    edit.dataset.editWagerId = wager.id;
-    edit.textContent = wager.status === "open" ? "结算 / 编辑" : "查看 / 编辑";
-    const remove = document.createElement("button");
-    remove.className = "entry-action destructive";
-    remove.type = "button";
-    remove.dataset.deleteWagerId = wager.id;
-    remove.textContent = "删除";
-    actions.append(edit, remove);
-    row.append(actions);
-  }
-  const history = session.state.auditLog.filter((item) => item.entity === "wager" && item.entityId === wager.id);
-  if (history.length) {
-    const detailsLog = document.createElement("details");
-    detailsLog.className = "row-history";
-    const summary = document.createElement("summary");
-    summary.textContent = `修改记录 ${history.length}`;
-    const list = document.createElement("ul");
-    for (const item of history.slice().reverse()) {
-      const line = document.createElement("li");
-      line.textContent = `${new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.at))} · ${item.action === "create" ? "新增" : item.action === "delete" ? "删除" : "编辑"}`;
-      list.append(line);
-    }
-    detailsLog.append(summary, list);
-    row.append(detailsLog);
-  }
-  return row;
+function createWagerRow(wager) {
+ const row=document.createElement('li');row.className='order-card';const button=document.createElement('button');button.type='button';button.className='order-open';button.addEventListener('click',()=>design.openDetail(wager.id));
+ const title=document.createElement('strong');title.textContent=wager.event;
+ const status=document.createElement('span');status.className='status-chip '+(wager.status==='open'?'pending':'');status.textContent=wager.status==='open'?'未结算':'已结算';
+ const meta=document.createElement('p');meta.className='order-meta';meta.textContent=[wager.combo==='parlay'?(wager.legs?.length||'—')+'串1':'单注',wager.sport,wager.market].filter(Boolean).join(' · ');
+ const values=document.createElement('div');values.className='order-values';const cash=document.createElement('span');cash.textContent='本金 '+formatMoney(wager.stakeMinor)+(wager.status==='open'?'':'  返还 '+formatMoney(wager.actualReturnMinor));const net=document.createElement('strong');net.className=wagerResult(wager)<0?'negative':'positive';net.textContent=wager.status==='open'?'占用本金':formatMoney(wagerResult(wager));values.append(cash,net);button.append(title,status,meta,values);row.append(button);return row;
 }
 
 function currentCycleData(sourceWagers = session.state.wagers) {
@@ -417,7 +375,34 @@ function wagerCashChangeBetween(wagers, start, end) {
   }, 0);
 }
 
-function renderOverview() { const wagers=[...session.state.wagers].sort((a,b)=>b.placedAt.localeCompare(a.placedAt)); $('#overview-recent-list').replaceChildren(...wagers.slice(0,4).map(wager=>createWagerRow(wager))); }
+function renderImportJobs() {
+  $('#import-jobs').replaceChildren(...importJobs.slice(-10).reverse().map((job,index)=>{const row=document.createElement('button');row.type='button';row.className='import-job';const icon=document.createElement('span'),copy=document.createElement('span'),name=document.createElement('strong'),status=document.createElement('small');icon.className='receipt-symbol';icon.textContent='▤';name.textContent=`图片 ${importJobs.length-index}`;status.textContent=job.phase;copy.append(name,status);row.append(icon,copy);if(job.recordId)row.addEventListener('click',()=>design.openDetail(job.recordId));else if(job.phase==='疑似重复')row.addEventListener('click',()=>alert('此图片与本批次的另一张相同，已暂停重复入账，请核对原记录。'));else row.disabled=true;return row;}));
+}
+async function queueImages(files) {
+  if(!session || !files.length)return;
+  const owner=session;
+  intake.clear();
+  for(const job of importJobs)if(['识别中','待确认','等待识别'].includes(job.phase)){job.phase='已取消';job.file=null;}
+  activeImportJob=null;
+  $('#review-progress').textContent='正在检查图片与重复记录…';
+  for(const file of files.slice(0,10)){
+    if(file.size>10*1024*1024 || !file.type.startsWith('image/')){importJobs.push({file:null,phase:'文件不支持'});continue;}
+    try {
+      const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer()))].map(n=>n.toString(16).padStart(2,'0')).join('');
+      if(session!==owner)return;
+      const previous=session.state.wagers.find(w=>w.imageFingerprint===hash);
+      const duplicate=previous || importJobs.find(job=>job.fingerprint===hash&&!['已取消','文件不支持'].includes(job.phase));
+      importJobs.push({file:duplicate?null:file,phase:duplicate?'疑似重复':'等待识别',fingerprint:hash,recordId:previous?.id||duplicate?.recordId});
+    } catch {if(session!==owner)return;importJobs.push({file,phase:'等待识别'});}
+  }
+  startNextImport();
+}
+function startNextImport() {
+  const job=importJobs.find(job=>job.phase==='等待识别');
+  if(!job){renderImportJobs();return;}
+  openNewWager();activeImportJob=job;job.phase='识别中';selectWagerImage(job.file);renderImportJobs();
+}
+function renderOverview() { renderImportJobs();const imported=new Set(importJobs.map(job=>job.recordId));const wagers=[...session.state.wagers].filter(w=>!imported.has(w.id)).sort((a,b)=>b.placedAt.localeCompare(a.placedAt)); $('#overview-recent-list').replaceChildren(...wagers.slice(0,3).map(wager=>createWagerRow(wager))); }
 
 function renderRecords() {
   const allWagers = [...session.state.wagers].sort((a, b) => b.placedAt.localeCompare(a.placedAt));
@@ -431,12 +416,12 @@ function renderRecords() {
     const drilldownMatch = !drilldown || (wagerDate(wager, drilldown.dateBasis) >= drilldown.range.start
       && wagerDate(wager, drilldown.dateBasis) <= drilldown.range.end
       && analysisGroup(wager, drilldown.dimension, drilldown.dateBasis) === drilldown.value);
-    return statusMatch && queryMatch && drilldownMatch;
+    return statusMatch && queryMatch && drilldownMatch && design.filterRecord(wager);
   });
   $("#wager-count").textContent = `${wagers.length} 笔投注 · 未结算 ${allWagers.filter((wager) => wager.status === "open").length} 笔${activeWagerDrilldown ? ` · 分析筛选：${activeWagerDrilldown.value}` : ""}`;
   $("#clear-wager-drilldown").classList.toggle("hidden", !activeWagerDrilldown);
   $("#wager-empty-state").classList.toggle("hidden", wagers.length > 0);
-  $("#wager-list").replaceChildren(...wagers.map((wager) => createWagerRow(wager)));
+  const timeline=[],counts=new Map();for(const w of wagers){const day=localDateFromTimestamp(w.placedAt);counts.set(day,(counts.get(day)||0)+1);}let previousDay='';for(const w of wagers){const day=localDateFromTimestamp(w.placedAt);if(day!==previousDay){const heading=document.createElement('li');heading.className='day-heading';heading.textContent=formatDate(day)+' · '+counts.get(day)+'笔';timeline.push(heading);previousDay=day;}timeline.push(createWagerRow(w));}$('#wager-list').replaceChildren(...timeline);
   $$(`[data-wager-filter]`).forEach((button) => {
     const selected = button.dataset.wagerFilter === activeWagerFilter;
     button.classList.toggle("selected", selected);
@@ -444,8 +429,8 @@ function renderRecords() {
   });
 
   const all = [...session.state.records].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
-  const filtered = activeFilter === "all" ? all : all.filter((record) => activeFilter === "movement" ? TYPE[record.kind]?.group === "movement" : record.kind === activeFilter);
-  $("#records-count").textContent = activeFilter === "all" ? `共 ${all.length} 笔记录` : `当前筛选 ${filtered.length} / ${all.length} 笔`;
+  const filtered = (activeFilter === "all" ? all : all.filter((record) => activeFilter === "movement" ? TYPE[record.kind]?.group === "movement" : record.kind === activeFilter)).filter(design.cashFilter);
+  $("#records-count").textContent = activeFilter === "all" ? `当前范围 ${filtered.length} 笔记录` : `当前筛选 ${filtered.length} / ${all.length} 笔`;
   const empty = filtered.length === 0;
   $("#records-empty-state").classList.toggle("hidden", !empty);
   $("#records-empty-title").textContent = all.length === 0 ? "还没有流水" : "没有符合条件的记录";
@@ -527,104 +512,21 @@ function analysisGroup(wager, dimension, dateBasis = analysisDateBasis) {
   return value?.trim() || "未填写";
 }
 
-function renderWagerAnalysisTrend(wagers, range) {
-  const monthly = activeAnalysisPeriod === "all" || (range.start && range.end && new Date(range.end) - new Date(range.start) > 90 * 86400000);
-  const groups = new Map();
-  for (const wager of wagers) {
-    if (!isSettledForRoi(wager)) continue;
-    const day = wagerDate(wager, analysisDateBasis);
-    if (!day) continue;
-    const key = monthly ? day.slice(0, 7) : day;
-    const item = groups.get(key) ?? { net: 0, count: 0 };
-    item.net += wagerResult(wager);
-    item.count += 1;
-    groups.set(key, item);
-  }
-  const rows = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const maximum = Math.max(1, ...rows.map(([, item]) => Math.abs(item.net)));
-  const container = $("#analysis-trend");
-  container.replaceChildren();
-  for (const [key, item] of rows) {
-    const row = document.createElement("div");
-    row.className = "trend-row";
-    const label = document.createElement("span");
-    label.className = "trend-label";
-    label.textContent = monthly ? formatMonth(key) : formatDate(key);
-    const track = document.createElement("span");
-    track.className = "trend-track";
-    const bar = document.createElement("progress");
-    bar.className = `trend-bar ${item.net < 0 ? "loss" : "gain"}`;
-    bar.max = 100;
-    bar.value = Math.max(4, Math.abs(item.net) / maximum * 100);
-    track.append(bar);
-    const value = document.createElement("strong");
-    value.className = `trend-value ${item.net < 0 ? "negative" : ""}`;
-    value.textContent = formatMoney(item.net);
-    row.append(label, track, value);
-    container.append(row);
-  }
-  $("#trend-title").textContent = monthly ? "每月已结算净结果" : "每日已结算净结果";
-  $("#analysis-no-trend").classList.toggle("hidden", rows.length > 0);
+function renderWagerAnalysisTrend(wagers,range) {const groups=new Map();for(const w of wagers){if(!isSettledForRoi(w))continue;const day=wagerDate(w,analysisDateBasis);if(day)groups.set(day,(groups.get(day)||0)+wagerResult(w));}const rows=[...groups].sort(([a],[b])=>a.localeCompare(b)).map(([day,net])=>({day,net}));drawCumulative($('#analysis-trend'),rows,formatMoney);$('#analysis-no-trend').classList.toggle('hidden',rows.length>0);}
+
+function renderOddsSummary(wagers) {
+  const groups=new Map();
+  for(const w of wagers){const label=analysisGroup(w,'odds');const list=groups.get(label)||[];list.push(w);groups.set(label,list);}
+  const table=document.createElement('table');const head=document.createElement('tr');
+  for(const label of ['区间','笔数','胜率','ROI']){const th=document.createElement('th');th.textContent=label;head.append(th);}table.append(head);
+  for(const [label,list] of [...groups].sort(([a],[b])=>a.localeCompare(b))){const m=wagerMetrics(list),o=wagerOutcomeMetrics(list),row=document.createElement('tr');for(const value of [label,list.length,o.wins+o.losses?(o.wins/(o.wins+o.losses)*100).toFixed(0)+'%':'—',m.roi==null?'—':m.roi.toFixed(1)+'%']){const cell=document.createElement('td');cell.textContent=String(value);row.append(cell);}table.append(row);}
+  $('#odds-summary').replaceChildren(table);
 }
 
 function renderWagerBreakdown(wagers) {
-  const dimension = $("#analysis-dimension").value;
-  const completenessFields = ["sport", "league", "market", "platform", "oddsMilli"];
-  const completenessLabels = { sport: "运动", league: "联赛", market: "玩法", platform: "平台", oddsMilli: "赔率" };
-  const groups = new Map();
-  for (const wager of wagers) {
-    const key = analysisGroup(wager, dimension);
-    const item = groups.get(key) ?? { count: 0, stake: 0, net: 0, settledCount: 0, start: "", end: "", completeFields: 0, missingFields: Object.fromEntries(completenessFields.map((field) => [field, 0])) };
-    item.count += 1;
-    for (const field of completenessFields) {
-      const complete = field === "oddsMilli" ? wager[field] != null : typeof wager[field] === "string" && Boolean(wager[field].trim());
-      if (complete) item.completeFields += 1;
-      else item.missingFields[field] += 1;
-    }
-    const day = wagerDate(wager, analysisDateBasis);
-    if (day) {
-      item.start = !item.start || day < item.start ? day : item.start;
-      item.end = !item.end || day > item.end ? day : item.end;
-    }
-    if (isSettledForRoi(wager)) {
-      item.settledCount += 1;
-      item.stake += wager.stakeMinor;
-      item.net += wagerResult(wager);
-    }
-    groups.set(key, item);
-  }
-  const list = $("#type-breakdown");
-  list.replaceChildren();
-  const sorted = [...groups.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 12);
-  $("#breakdown-empty").classList.toggle("hidden", sorted.length > 0);
-  for (const [label, item] of sorted) {
-    const row = document.createElement("div");
-    row.className = "breakdown-row";
-    const heading = document.createElement("div");
-    heading.className = "breakdown-heading";
-    const name = document.createElement("button");
-    name.className = "drilldown-button";
-    name.type = "button";
-    name.dataset.wagerDimension = dimension;
-    name.dataset.wagerValue = label;
-    name.textContent = `${label} · ${item.count} 笔`;
-    const stats = document.createElement("strong");
-    const roi = item.stake ? `${(item.net / item.stake * 100).toFixed(1)}%` : "—";
-    stats.textContent = `结算额 ${formatMoney(item.stake)} · ROI ${roi}`;
-    heading.append(name, stats);
-    const result = document.createElement("span");
-    result.className = `breakdown-result ${item.net < 0 ? "negative" : ""}`;
-    const span = item.start ? `${formatDate(item.start, true)}${item.start === item.end ? "" : `–${formatDate(item.end, true)}`}` : "无日期范围";
-    result.textContent = `${item.settledCount ? `净结果 ${formatMoney(item.net)} · 已结算 ${item.settledCount}${item.settledCount < 30 ? " · 样本少" : ""}` : "尚无已结算投注"} · 覆盖 ${span}`;
-    const completeness = document.createElement("p");
-    completeness.className = "breakdown-quality";
-    const percent = Math.round(item.completeFields / (item.count * completenessFields.length) * 100);
-    const missing = completenessFields.filter((field) => item.missingFields[field] > 0)
-      .map((field) => `${completenessLabels[field]} ${item.missingFields[field]} 笔`).join(" · ");
-    completeness.textContent = `关键字段已填写 ${percent}%${missing ? ` · 缺失 ${missing}` : " · 字段齐全"}`;
-    row.append(heading, result, completeness);
-    list.append(row);
-  }
+const dimension=$('#analysis-dimension').value,groups=new Map();for(const w of wagers){const key=analysisGroup(w,dimension),list=groups.get(key)||[];list.push(w);groups.set(key,list);}const container=$('#type-breakdown'),rows=[...groups].sort((a,b)=>b[1].length-a[1].length);container.replaceChildren();$('#breakdown-empty').classList.toggle('hidden',rows.length>0);const max=Math.max(1,...rows.map(([,list])=>list.reduce((sum,w)=>sum+w.stakeMinor,0)));
+for(const[label,list]of rows.slice(0,6)){const row=document.createElement('div');row.className='category-bar';const name=document.createElement('span'),bar=document.createElement('progress'),amount=document.createElement('span');name.textContent=label;bar.max=max;bar.value=list.reduce((sum,w)=>sum+w.stakeMinor,0);amount.textContent=formatMoney(bar.value);row.append(name,bar,amount);container.append(row);}
+const table=document.createElement('table'),head=document.createElement('tr');for(const label of ['类别','笔数','净结果','ROI']){const th=document.createElement('th');th.textContent=label;head.append(th);}table.append(head);for(const[label,list]of rows){const m=wagerMetrics(list),tr=document.createElement('tr'),td=document.createElement('td'),button=document.createElement('button');button.type='button';button.className='drilldown-button';button.textContent=label;button.dataset.wagerDimension=dimension;button.dataset.wagerValue=label;td.append(button);tr.append(td);for(const value of [list.length,formatMoney(m.settledNet),m.roi==null?'—':m.roi.toFixed(1)+'%']){const cell=document.createElement('td');cell.textContent=String(value);tr.append(cell);}table.append(tr);}container.append(table);document.querySelectorAll('[data-dimension]').forEach(button=>button.classList.toggle('selected',button.dataset.dimension===dimension));
 }
 
 function renderStakeDistribution(wagers) {
@@ -669,16 +571,14 @@ function renderAnalysis() {
   $("#analysis-net").textContent = formatMoney(metrics.settledNet);
   $("#analysis-net").classList.toggle("negative", metrics.settledNet < 0);
   $("#analysis-stake").textContent = formatMoney(metrics.settledStake);
-  $("#analysis-return").textContent = formatMoney(metrics.returned);
   $("#analysis-rate").textContent = metrics.roi == null ? "—" : `${metrics.roi.toFixed(1)}%`;
   $("#analysis-rate").classList.toggle("negative", metrics.settledNet < 0);
-  $("#analysis-open").textContent = formatMoney(metrics.openStake);
-  $("#analysis-count").textContent = String(metrics.count);
   const outcomes = wagerOutcomeMetrics(wagers, analysisDateBasis);
-  $("#analysis-average-stake").textContent = outcomes.averageStake == null ? "—" : formatMoney(outcomes.averageStake);
+$('#analysis-winrate').textContent=outcomes.wins+outcomes.losses?((outcomes.wins/(outcomes.wins+outcomes.losses))*100).toFixed(1)+'%':'—';
+const oddsRows=wagers.filter(w=>isSettledForRoi(w)&&w.oddsMilli!=null);$('#analysis-average-odds').textContent=oddsRows.length?(oddsRows.reduce((a,w)=>a+w.oddsMilli,0)/oddsRows.length/1000).toFixed(2):'—';
+$('#category-range').textContent=range.label+' · '+wagers.length+'笔';
+renderOddsSummary(wagers);
   $("#analysis-max-stake").textContent = outcomes.maxStake == null ? "—" : formatMoney(outcomes.maxStake);
-  $("#analysis-outcomes").textContent = `${outcomes.wins} / ${outcomes.losses}`;
-  $("#analysis-streaks").textContent = `${outcomes.maxWinStreak} / ${outcomes.maxLossStreak}`;
   $("#analysis-period-label").textContent = `${range.label} · ${analysisDateBasis === "placed" ? "按投注日期" : "按结算日期"} · ${metrics.count} 笔投注`;
   const completenessFields = ["sport", "league", "market", "platform", "oddsMilli"];
   const fieldCount = wagers.length * completenessFields.length;
@@ -695,7 +595,6 @@ function renderAnalysis() {
   const basisDate = analysisDateBasis === "placed" ? (record) => record.date : (record) => record.date;
   const legacyRecords = session.state.records.filter((record) => basisDate(record) >= range.start && basisDate(record) <= range.end && isLegacyBetRecord(record));
   const legacyNet = calculate(legacyRecords).net;
-  $("#legacy-analysis-note").textContent = legacyRecords.length ? `另有 ${legacyRecords.length} 笔旧版未关联流水，原始净结果 ${formatMoney(legacyNet)}；因缺少结算状态，未计入新口径 ROI。` : "旧版未关联投注流水不计入以上已结算 ROI。所有统计仅描述本机已有记录，不用于预测结果。";
   $$(`[data-period]`).forEach((button) => {
     const selected = button.dataset.period === activeAnalysisPeriod;
     button.classList.toggle("selected", selected);
@@ -708,95 +607,13 @@ function renderAnalysis() {
   });
 }
 
-function renderTrend(container, records, period, compact) {
-  const groups = new Map();
-  if (compact) {
-    for (let offset = 6; offset >= 0; offset--) {
-      const date = localDateInput(-offset);
-      groups.set(date, { label: formatDate(date), net: 0, hasBetRecord: false });
-    }
-  }
-  const monthly = period === "all";
-  for (const record of records) {
-    if (!isLegacyBetRecord(record)) continue;
-    const key = monthly ? record.date.slice(0, 7) : record.date;
-    const group = groups.get(key) ?? { label: monthly ? formatMonth(key) : formatDate(key), net: 0, hasBetRecord: false };
-    group.net += record.deltaMinor;
-    group.hasBetRecord = true;
-    groups.set(key, group);
-  }
-  const visible = [...groups.entries()].filter(([, group]) => compact || group.hasBetRecord).sort(([a], [b]) => a.localeCompare(b));
-  container.replaceChildren();
-  if (!visible.length) return;
-  const maxMagnitude = Math.max(1, ...visible.map(([, group]) => Math.abs(group.net)));
-  for (const [key, group] of visible) {
-    const row = document.createElement("div");
-    row.className = "trend-row";
-    const label = document.createElement("span");
-    label.className = "trend-label";
-    label.textContent = group.label;
-    const track = document.createElement("span");
-    track.className = "trend-track";
-    const bar = document.createElement("progress");
-    bar.className = `trend-bar ${group.net < 0 ? "loss" : "gain"}`;
-    bar.max = 100;
-    bar.value = group.hasBetRecord ? Math.max(4, Math.abs(group.net) / maxMagnitude * 100) : 0;
-    bar.setAttribute("aria-label", `${group.label}净结果${formatMoney(group.net)}`);
-    track.append(bar);
-    const value = document.createElement("strong");
-    value.className = `trend-value ${group.net < 0 ? "negative" : ""}`;
-    value.textContent = formatMoney(group.net);
-    row.append(label, track, value);
-    row.dataset.periodKey = key;
-    container.append(row);
-  }
-}
-
-function formatMonth(value) {
-  const [year, month] = value.split("-").map(Number);
-  return new Intl.DateTimeFormat("zh-CN", { year: "2-digit", month: "short" }).format(new Date(year, month - 1, 1));
-}
-
-function renderBreakdown(records) {
-  const definitions = ["stake", "payout", "refund", "deposit", "withdrawal"];
-  const amounts = definitions.map((kind) => ({
-    kind,
-    amount: records.filter((record) => record.kind === kind).reduce((sum, record) => sum + record.amountMinor, 0),
-    count: records.filter((record) => record.kind === kind).length,
-  }));
-  const total = amounts.reduce((sum, item) => sum + item.amount, 0);
-  const list = $("#type-breakdown");
-  list.replaceChildren();
-  $("#breakdown-empty").classList.toggle("hidden", total !== 0);
-  for (const item of amounts) {
-    if (item.count === 0) continue;
-    const row = document.createElement("div");
-    row.className = "breakdown-row";
-    const header = document.createElement("div");
-    header.className = "breakdown-heading";
-    const label = document.createElement("span");
-    label.textContent = TYPE[item.kind].label;
-    const value = document.createElement("strong");
-    value.textContent = `${formatMoney(item.amount)} · ${item.count} 笔`;
-    header.append(label, value);
-    const track = document.createElement("span");
-    track.className = "breakdown-track";
-    const bar = document.createElement("progress");
-    bar.className = `breakdown-bar ${TYPE[item.kind].color}`;
-    bar.max = 100;
-    bar.value = total ? Math.max(3, item.amount / total * 100) : 0;
-    track.append(bar);
-    row.append(header, track);
-    list.append(row);
-  }
-}
-
 function render() {
   if (!session) return;
   renderOverview();
   renderRecords();
   renderAnalysis();
   renderRisk();
+  design.render();
 }
 
 function riskAlerts() {
@@ -936,7 +753,7 @@ function amountInputMinor(value, allowZero = false) {
 }
 
 function localDateTimeInput(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
 }
 
 function renderLegEditor() {
@@ -1104,6 +921,7 @@ async function saveWager(event) {
     note: $("#wager-note").value.trim(),
     beforeState: $("#wager-state").value.trim(),
     source: wagerEntrySource,
+    imageFingerprint: activeImportJob?.fingerprint || current?.imageFingerprint || null,
     createdAt: current?.createdAt ?? new Date().toISOString(),
     ...(current ? { updatedAt: new Date().toISOString() } : {}),
   };
@@ -1114,11 +932,14 @@ async function saveWager(event) {
   if (blocked.length) return setError("#wager-error", `未保存：${blocked.join(" ")}`);
   let nextState = { ...session.state, sequence: session.state.sequence + 1, wagers };
   nextState.auditLog = appendAudit(nextState, "wager", wager.id, current ? "edit" : "create", current, wager);
+  let saved=false;
   saveBusy = true;
   $("#wager-save-button").disabled = true;
   try {
     const health = await commitState(nextState, session.key);
     session.state = nextState;
+    saved=true;
+    if(activeImportJob){activeImportJob.phase='已保存';activeImportJob.recordId=wager.id;activeImportJob.file=null;activeImportJob=null;}
     wagerDialog.close();
     render();
     updateHealthDisplay(health);
@@ -1129,6 +950,7 @@ async function saveWager(event) {
     saveBusy = false;
     $("#wager-save-button").disabled = false;
     finishPendingLock();
+    if(saved && session) startNextImport();
   }
 }
 
@@ -1656,14 +1478,10 @@ $("#wager-recent-template").addEventListener("change", (event) => {
   setError("#wager-error", "已带入分类，请核对后修改；金额、赔率、时间和赛果未从旧记录带入。");
 });
 $("#wager-form").addEventListener("submit", saveWager);
-$("#wager-image-input").addEventListener("change", (event) => {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  selectWagerImage(file);
-});
+$('#wager-image-input').addEventListener('change',event=>{const files=[...event.target.files||[]];event.target.value='';queueImages(files);});
 $('#home-import').addEventListener('click', () => { openNewWager(); $('#wager-image-input').click(); });
 $('#home-camera').addEventListener('click', () => { openNewWager(); $('#wager-camera-input').click(); });
-$('#wager-camera-input').addEventListener('change', event => { const file = event.target.files?.[0]; event.target.value=''; selectWagerImage(file); });
+$('#wager-camera-input').addEventListener('change', event => { const file = event.target.files?.[0]; event.target.value=''; queueImages(file?[file]:[]); });
 $("#remove-wager-image").addEventListener("click", () => clearWagerImagePreview(true));
 $("#wager-image-preview").addEventListener("error", () => {
   if (!wagerPreviewUrl) return;
@@ -1672,6 +1490,7 @@ $("#wager-image-preview").addEventListener("error", () => {
 });
 $("#close-wager-dialog").addEventListener("click", () => wagerDialog.close());
 wagerDialog.addEventListener("close", () => {
+  if(activeImportJob){for(const job of importJobs){if(['识别中','等待识别','待确认'].includes(job.phase)){job.phase='已取消';job.file=null;}}activeImportJob=null;renderImportJobs();}
   intake.clear();
   editingWagerId = null;
   wagerOriginalSource = "manual";

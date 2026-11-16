@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {periodBounds} from '../src/design.js';
+assert.deepEqual(periodBounds({period:'week'},new Date(2026,10,17)),{start:'2026-11-11',end:'2026-11-17'});
+assert.deepEqual(periodBounds({period:'month'},new Date(2026,10,17)),{start:'2026-11-01',end:'2026-11-17'});
+assert.deepEqual(periodBounds({period:'custom',start:'2026-10-01',end:'2026-10-31'}),{start:'2026-10-01',end:'2026-10-31'});
+const context=vm.createContext({URL,location:{href:'https://example.invalid/app/'}});
+vm.runInContext(fs.readFileSync(new URL('../src/storage.js',import.meta.url),'utf8').replace(/^export /gm,''),context);
+const w={id:'demo',placedAt:'2026-11-15T12:00:12Z',settledAt:null,settlementTimeUnknown:true,event:'Example A vs B',sport:'篮球',league:'',market:'全场',platform:'',result:'',note:'',beforeState:'',source:'image',status:'cashout',combo:'parlay',stakeMinor:10000,feeMinor:0,actualReturnMinor:0,tags:[],createdAt:'2026-11-15T12:00:12Z',legs:[{event:'Example A vs B',sport:'篮球',selection:'Example A',market:'全场',stage:'',odds:'1.80',startText:''}],selection:'',startText:'',imageFingerprint:'a'.repeat(64)};
+const state={schemaVersion:2,sequence:1,records:[],wagers:[w],auditLog:[],preferences:{analysisDateBasis:'settled'}};
+context.validateState(state,1);const restored=JSON.parse(JSON.stringify(state));context.validateState(restored,1);
+assert.deepEqual(restored.wagers[0].legs,w.legs);assert.equal(restored.wagers[0].imageFingerprint,w.imageFingerprint);
+assert.throws(()=>context.validateState({...state,preferences:{analysisDateBasis:'bad'}},1));
+assert.throws(()=>context.validateState({...state,wagers:[{...w,settlementTimeUnknown:false}]},1));
+assert.throws(()=>context.validateState({...state,wagers:[{...w,imageFingerprint:'bad'}]},1));
+const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
+for(const page of ['overview','records','analysis','categories','distribution','cash','detail','risk','settings'])assert.ok(html.includes('id="page-'+page+'"'));
+assert.ok(!html.includes('compatibility-metrics'));assert.ok(!html.includes('for="wager-fee"'));assert.ok(html.includes('src/design.css'));
+const sw=fs.readFileSync(new URL('../sw.js',import.meta.url),'utf8');for(const asset of ['design.js','design.css','receipt.js','game-icons.js'])assert.ok(sw.includes(asset));
+console.log('Nine-screen checks passed: ranges, backup fields/preferences, invalid data rejection, UI targets and offline assets.');
+
